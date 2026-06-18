@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TaskFlow</title>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="https://unpkg.com/dexie@3/dist/dexie.js"></script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('service-worker.js').catch(function(){})})}</script>
+<style>
+:root{--primary:#4f46e5;--primary-light:#818cf8;--primary-bg:#eef2ff;--bg:#f8fafc;--surface:#ffffff;--text:#1e293b;--text-secondary:#64748b;--border:#e2e8f0;--shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.1);--radius:12px;--radius-sm:8px;--transition:.2s ease;--todo-color:#f59e0b;--doing-color:#3b82f6;--done-color:#10b981;--high-color:#ef4444;--medium-color:#f59e0b;--low-color:#6b7280}
+.dark{--primary:#818cf8;--primary-light:#a5b4fc;--primary-bg:#1e1b4b;--bg:#0f172a;--surface:#1e293b;--text:#f1f5f9;--text-secondary:#94a3b8;--border:#334155;--shadow:0 1px 3px rgba(0,0,0,.3);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.4)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;background:var(--bg);color:var(--text);transition:background var(--transition),color var(--transition);height:100vh;overflow:hidden}
+#app{display:flex;height:100vh}
+#sidebar{width:220px;min-width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 16px;transition:background var(--transition),border-color var(--transition)}
+.sidebar-header h1{font-size:20px;font-weight:700;color:var(--primary);margin-bottom:28px}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 14px;margin-bottom:4px;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--text-secondary);font-size:14px;cursor:pointer;transition:all var(--transition)}
+.nav-item:hover{background:var(--primary-bg);color:var(--text)}
+.nav-item.active{background:var(--primary-bg);color:var(--primary);font-weight:600}
+.sidebar-footer{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding-top:16px;border-top:1px solid var(--border)}
+.sidebar-footer button{display:flex;align-items:center;gap:8px;padding:8px 12px;border:none;border-radius:var(--radius-sm);background:transparent;color:var(--text-secondary);font-size:13px;cursor:pointer;transition:all var(--transition)}
+.sidebar-footer button:hover{background:var(--primary-bg);color:var(--text)}
+.sidebar-sync{display:flex;align-items:center;gap:6px;padding:8px 12px;font-size:11px;color:var(--text-secondary);border-top:1px solid var(--border);margin-top:8px;padding-top:8px}
+.sidebar-sync .sync-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sidebar-sync .sync-dot.online{background:#10b981}
+.sidebar-sync .sync-dot.offline{background:#ef4444}
+.sidebar-sync .sync-dot.syncing{background:#f59e0b;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#main{flex:1;overflow-y:auto;padding:28px 32px}
+.view{display:none}
+.view.active{display:block;animation:fadeIn .25s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.view-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+.view-header h2{font-size:22px;font-weight:700}
+.view-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.view-actions select,.view-actions input[type="text"]{padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px;transition:all var(--transition)}
+.view-actions select:focus,.view-actions input:focus{outline:none;border-color:var(--primary)}
+.btn-primary{padding:8px 18px;border:none;border-radius:var(--radius-sm);background:var(--primary);color:#fff;font-size:13px;font-weight:600;cursor:pointer;transition:all var(--transition)}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
+.btn-secondary{padding:8px 18px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;transition:all var(--transition)}
+.btn-secondary:hover{background:var(--primary-bg)}
+.btn-danger{padding:8px 18px;border:none;border-radius:var(--radius-sm);background:#ef4444;color:#fff;font-size:13px;cursor:pointer;transition:all var(--transition)}
+.btn-danger:hover{opacity:.9}
+.kanban-board{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;min-height:60vh}
+.kanban-column{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);display:flex;flex-direction:column;transition:background var(--transition),border-color var(--transition)}
+.column-header{padding:14px 16px;font-weight:600;font-size:14px;border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0}
+.column-body{padding:12px;flex:1;min-height:200px;transition:background .15s}
+.column-body.drag-over{background:var(--primary-bg)}
+.task-card{background:var(--bg);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:8px;border:1px solid var(--border);cursor:grab;transition:all var(--transition);position:relative}
+.task-card:hover{box-shadow:var(--shadow-lg);border-color:var(--primary-light)}
+.task-card:active{cursor:grabbing}
+.task-card.dragging{opacity:.5}
+.task-title{font-weight:600;font-size:14px;margin-bottom:6px}
+.task-desc{font-size:12px;color:var(--text-secondary);margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.task-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);flex-wrap:wrap}
+.task-priority{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;color:#fff}
+.priority-high{background:var(--high-color)}
+.priority-medium{background:var(--medium-color)}
+.priority-low{background:var(--low-color)}
+.task-due{display:flex;align-items:center;gap:4px}
+.task-repeat{font-size:10px;color:var(--primary);font-weight:600}
+.task-actions{display:flex;gap:4px;margin-top:8px}
+.task-actions button{padding:4px 8px;border:none;border-radius:4px;font-size:11px;cursor:pointer;transition:all var(--transition)}
+.task-actions .edit-btn{background:var(--primary-bg);color:var(--primary)}
+.task-actions .delete-btn{background:#fef2f2;color:#ef4444}
+.task-actions button:hover{opacity:.8}
+.task-attachments{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.task-attachment{font-size:10px;padding:2px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:3px}
+.task-attachment:hover{border-color:var(--primary-light)}
+.empty-column{display:flex;align-items:center;justify-content:center;height:120px;color:var(--text-secondary);font-size:13px;text-align:center}
+.cal-nav{display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.cal-nav h3{font-size:18px;font-weight:600;min-width:160px;text-align:center}
+.cal-nav button{padding:6px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);cursor:pointer;font-size:16px;transition:all var(--transition)}
+.cal-nav button:hover{background:var(--primary-bg);border-color:var(--primary-light)}
+.cal-selector{padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px;margin-left:auto}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;background:var(--border);border-radius:var(--radius);overflow:hidden}
+.cal-day-header{background:var(--surface);padding:10px;text-align:center;font-weight:600;font-size:13px;color:var(--text-secondary)}
+.cal-day{background:var(--surface);min-height:100px;padding:6px;cursor:pointer;transition:background var(--transition);position:relative}
+.cal-day:hover{background:var(--primary-bg)}
+.cal-day.empty{background:var(--bg);cursor:default}
+.cal-day.today{background:var(--primary-bg)}
+.cal-day.today .day-number{background:var(--primary);color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center}
+.day-number{font-size:14px;font-weight:600;margin-bottom:4px;display:inline-block;width:26px;height:26px;line-height:26px;text-align:center}
+.cal-event,.cal-task{font-size:11px;padding:2px 6px;border-radius:4px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:#fff}
+.cal-task{background:var(--primary-light);color:#fff}
+.cal-event{font-weight:500}
+.cal-event:hover,.cal-task:hover{opacity:.9}
+.cal-recurring{border-left:3px solid var(--todo-color);background:#fef3c7;color:#92400e}
+.cal-legend{display:flex;gap:16px;margin-top:16px;font-size:13px;color:var(--text-secondary);flex-wrap:wrap}
+.notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.note-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:all var(--transition);position:relative}
+.note-card:hover{box-shadow:var(--shadow-lg);border-color:var(--primary-light);transform:translateY(-2px)}
+.note-card.pinned{border-left:3px solid var(--primary)}
+.note-card .pin-badge{position:absolute;top:8px;right:8px;font-size:16px;opacity:.6}
+.note-title{font-weight:600;font-size:15px;margin-bottom:8px;padding-right:24px}
+.note-content{font-size:13px;color:var(--text-secondary);line-height:1.6;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap}
+.note-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:10px}
+.note-tag{padding:2px 8px;background:var(--primary-bg);color:var(--primary);border-radius:10px;font-size:11px}
+.note-date{font-size:11px;color:var(--text-secondary);margin-top:8px}
+.note-actions{display:flex;gap:4px;margin-top:10px}
+.note-actions button{padding:4px 10px;border:none;border-radius:4px;font-size:11px;cursor:pointer;transition:all var(--transition)}
+.note-actions .pin-btn{background:var(--primary-bg);color:var(--primary)}
+.note-actions .edit-btn{background:var(--primary-bg);color:var(--primary)}
+.note-actions .delete-btn{background:#fef2f2;color:#ef4444}
+.note-actions button:hover{opacity:.8}
+.note-attachments{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.note-attachment{font-size:10px;padding:2px 6px;background:var(--surface);border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;gap:3px}
+/* Files */
+.files-header{display:flex;gap:12px;align-items:center;width:100%}
+.files-header input[type="text"]{flex:1;max-width:300px}
+.files-drop-zone{border:2px dashed var(--border);border-radius:var(--radius);padding:40px;text-align:center;color:var(--text-secondary);font-size:14px;cursor:pointer;transition:all var(--transition);margin-bottom:16px}
+.files-drop-zone:hover,.files-drop-zone.drag-over{border-color:var(--primary);background:var(--primary-bg);color:var(--primary)}
+.files-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.file-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;transition:all var(--transition);position:relative}
+.file-card:hover{box-shadow:var(--shadow-lg);border-color:var(--primary-light);transform:translateY(-2px)}
+.file-card .file-preview{height:120px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:36px;overflow:hidden}
+.file-card .file-preview img{width:100%;height:100%;object-fit:cover}
+.file-card .file-info{padding:10px 12px}
+.file-card .file-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-card .file-meta{font-size:11px;color:var(--text-secondary);margin-top:4px}
+.file-card .file-actions{display:flex;gap:4px;padding:0 12px 10px}
+.file-card .file-actions button{padding:3px 8px;border:none;border-radius:4px;font-size:10px;cursor:pointer}
+.file-card .file-actions .dl-btn{background:var(--primary-bg);color:var(--primary)}
+.file-card .file-actions .del-btn{background:#fef2f2;color:#ef4444}
+.file-card .file-checkbox{position:absolute;top:8px;left:8px;width:18px;height:18px;cursor:pointer;opacity:0;transition:opacity var(--transition)}
+.file-card:hover .file-checkbox{opacity:1}
+.file-card.selected{border-color:var(--primary);background:var(--primary-bg)}
+.file-empty{text-align:center;padding:60px 20px;color:var(--text-secondary);font-size:14px;grid-column:1/-1}
+.file-preview-modal .modal{max-width:800px}
+.file-preview-modal .preview-content{max-height:60vh;overflow:auto;display:flex;align-items:center;justify-content:center}
+.file-preview-modal .preview-content img{max-width:100%;max-height:60vh;object-fit:contain}
+.file-preview-modal .preview-content iframe{width:100%;height:60vh;border:none}
+.file-preview-modal .preview-content pre{width:100%;white-space:pre-wrap;font-size:13px}
+.file-preview-modal .preview-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.file-preview-modal .preview-header .file-icon{font-size:32px}
+.file-preview-modal .preview-header .file-details{flex:1}
+.file-preview-modal .preview-header .file-details .fname{font-weight:600;font-size:16px}
+.file-preview-modal .preview-header .file-details .finfo{font-size:12px;color:var(--text-secondary)}
+.file-preview-modal .preview-actions{display:flex;gap:8px;margin-top:16px}
+/* Settings */
+.settings-grid{max-width:640px}
+.settings-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.settings-section h3{font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text)}
+.setting-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0}
+.setting-row+.setting-row{border-top:1px solid var(--border)}
+.setting-label{font-size:14px;color:var(--text)}
+.setting-desc{font-size:12px;color:var(--text-secondary);margin-top:2px}
+.setting-input{display:flex;align-items:center;gap:8px}
+.setting-input select,.setting-input input[type="number"]{padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px}
+.setting-input input[type="number"]{width:80px}
+.setting-input input[type="text"]{padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px;width:280px}
+.toggle{position:relative;width:44px;height:24px;cursor:pointer}
+.toggle input{display:none}
+.toggle .slider{position:absolute;inset:0;background:var(--border);border-radius:12px;transition:all var(--transition)}
+.toggle .slider::before{content:'';position:absolute;left:2px;top:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:all var(--transition)}
+.toggle input:checked+.slider{background:var(--primary)}
+.toggle input:checked+.slider::before{transform:translateX(20px)}
+.color-picker-group{display:flex;gap:12px;align-items:center}
+.color-picker-group label{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+.color-picker-group input[type="color"]{width:32px;height:32px;border:2px solid var(--border);border-radius:6px;cursor:pointer;padding:0;background:none}
+.cal-mgmt-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-radius:var(--radius-sm);margin-bottom:6px}
+.cal-mgmt-item .cal-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+.cal-mgmt-item .cal-name{flex:1;font-size:14px}
+.cal-mgmt-item button{padding:4px 10px;border:none;border-radius:4px;font-size:11px;cursor:pointer}
+.cal-mgmt-item .edit-btn{background:var(--primary-bg);color:var(--primary)}
+.cal-mgmt-item .delete-btn{background:#fef2f2;color:#ef4444}
+.cal-mgmt-item .delete-btn:disabled{opacity:.4;cursor:not-allowed}
+.repeat-selector{display:flex;gap:6px;flex-wrap:wrap}
+.repeat-btn{padding:6px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:12px;cursor:pointer;transition:all var(--transition)}
+.repeat-btn:hover{background:var(--primary-bg)}
+.repeat-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.weekday-grid{display:flex;gap:4px;flex-wrap:wrap}
+.weekday-btn{width:36px;height:36px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;cursor:pointer;transition:all var(--transition);display:flex;align-items:center;justify-content:center}
+.weekday-btn:hover{background:var(--primary-bg)}
+.weekday-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.monthly-week-picker{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.monthly-week-picker select{padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;animation:fadeIn .2s ease}
+.modal-overlay.show{display:flex}
+.modal{background:var(--surface);border-radius:var(--radius);width:90%;max-width:520px;max-height:85vh;overflow-y:auto;box-shadow:var(--shadow-lg);padding:24px;animation:slideUp .25s ease}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.modal h3{font-size:18px;margin-bottom:20px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)}
+.form-group input,.form-group textarea,.form-group select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:14px;transition:border-color var(--transition);font-family:inherit}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{outline:none;border-color:var(--primary)}
+.form-group textarea{resize:vertical;min-height:80px}
+.form-row{display:flex;gap:12px}
+.form-row .form-group{flex:1}
+.form-attachments{margin-top:8px}
+.form-attachments .attach-list{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.form-attachments .attach-item{font-size:11px;padding:3px 8px;background:var(--primary-bg);border-radius:4px;display:flex;align-items:center;gap:4px}
+.form-attachments .attach-item .remove-attach{cursor:pointer;color:var(--high-color);font-weight:700;margin-left:2px}
+.form-attachments .attach-item .remove-attach:hover{opacity:.7}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+#toastContainer{position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:var(--radius-sm);color:#fff;font-size:14px;box-shadow:var(--shadow-lg);animation:slideIn .3s ease;min-width:200px}
+.toast.success{background:var(--done-color)}
+.toast.error{background:var(--high-color)}
+.toast.info{background:var(--primary)}
+@keyframes slideIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+#confirmModal .modal{max-width:380px;text-align:center}
+#confirmModal .modal p{margin:16px 0;font-size:14px;color:var(--text-secondary)}
+#confirmModal .modal-actions{justify-content:center}
+#main::-webkit-scrollbar{width:6px}
+#main::-webkit-scrollbar-track{background:transparent}
+#main::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+#main::-webkit-scrollbar-thumb:hover{background:var(--text-secondary)}
+#freepagesView .view-header{margin-bottom:8px}
+body.fp-fullscreen #sidebar{display:none}
+body.fp-fullscreen #main{padding:0;overflow:hidden}
+body.fp-fullscreen #freepagesView .view-header{display:none}
+body.fp-fullscreen #freepageContainer{position:fixed;top:0;left:0;right:0;bottom:0;z-index:999;height:100vh;border-radius:0;border:none}
+body.fp-fullscreen #freepageContent{height:calc(100vh - 90px)}
+#freepageContainer{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);display:flex;flex-direction:column;height:calc(100vh - 140px);transition:background var(--transition),border-color var(--transition)}
+#freepageTabBar{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0;align-items:flex-end}
+.freepage-tab{padding:6px 14px;border:1px solid var(--border);border-bottom:none;border-radius:var(--radius-sm) var(--radius-sm) 0 0;background:var(--bg);color:var(--text-secondary);font-size:13px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;user-select:none;transition:all var(--transition)}
+.freepage-tab:hover{background:var(--primary-bg)}
+.freepage-tab.active{background:var(--surface);color:var(--text);font-weight:600}
+.freepage-tab .tab-close-btn{background:none;border:none;cursor:pointer;font-size:14px;padding:0 2px;color:var(--text-secondary);line-height:1;transition:color var(--transition)}
+.freepage-tab .tab-close-btn:hover{color:var(--high-color)}
+#freepageTabAdd{padding:4px 12px 6px;border:none;background:transparent;color:var(--primary);font-size:20px;cursor:pointer;line-height:1;flex-shrink:0}
+#freepageToolbar{display:flex;align-items:center;gap:6px;padding:8px;border-bottom:1px solid var(--border);flex-wrap:wrap;flex-shrink:0;transition:border-color var(--transition)}
+#freepageToolbar button{padding:4px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;min-width:30px;text-align:center;transition:all var(--transition)}
+#freepageToolbar button:hover{background:var(--primary-bg);border-color:var(--primary-light)}
+#freepageToolbar select{padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;cursor:pointer}
+#freepageToolbar .toolbar-label{font-size:11px;color:var(--text-secondary);margin-right:2px}
+#freepageToolbar .color-wrap{position:relative;display:inline-flex;align-items:center}
+#freepageToolbar .color-wrap input[type="color"]{width:28px;height:28px;border:1px solid var(--border);border-radius:4px;padding:0;cursor:pointer;background:none}
+#freepageContent{flex:1;padding:16px;overflow-y:auto;outline:none;font-size:14px;line-height:1.8;white-space:pre-wrap;transition:background var(--transition),color var(--transition)}
+@media(max-width:900px){.kanban-board{grid-template-columns:1fr}.notes-grid{grid-template-columns:1fr}.files-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}}
+@media(max-width:700px){#sidebar{width:56px;min-width:56px;padding:16px 8px}.sidebar-header h1{font-size:0}.sidebar-header h1::after{content:'TF';font-size:18px}.nav-item span{display:none}.sidebar-footer button span{display:none}.sidebar-footer button{justify-content:center}.sidebar-sync span{display:none}#main{padding:20px 16px}}
+@media(max-width:500px){#sidebar{display:none}#mobileHeader{display:flex}#main{padding:0}.view-header{padding:12px 12px 0}.view-header h2{font-size:17px}#freepagesView .view-header{padding:12px 12px 0}#freepageContainer{height:calc(100vh - 100px);border-radius:0;border-left:none;border-right:none}#freepageToolbar{gap:3px;padding:6px 4px}#freepageToolbar button{padding:3px 7px;font-size:12px;min-width:26px}#freepageToolbar select{font-size:11px;padding:3px 4px}#freepageContent{padding:10px;font-size:13px}.freepage-tab{font-size:12px;padding:4px 10px}.kanban-board{gap:8px}.kanban-column{border-radius:8px}.column-body{min-height:120px;padding:8px}.task-card{padding:10px}.calendar-grid{font-size:12px}.cal-day{min-height:60px;padding:3px}.cal-day-header{padding:6px;font-size:11px}.cal-nav{gap:8px}.cal-nav h3{font-size:15px;min-width:120px}.modal{width:100%;max-width:100%;max-height:100vh;border-radius:0;padding:16px}.notes-grid{gap:10px}.note-card{padding:12px}.settings-grid{padding:0 12px}.settings-section{padding:14px}.view-actions{gap:4px}.view-actions select,.view-actions input{font-size:12px;padding:6px 8px}.btn-primary,.btn-secondary{padding:6px 14px;font-size:12px}.column-header{padding:10px 12px;font-size:13px}#freepagesView .view-header{margin-bottom:0}.form-row{flex-direction:column;gap:0}.files-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}.files-drop-zone{padding:20px}.file-card .file-preview{height:80px}}
+#mobileHeader{display:none;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+#mobileHeader h1{font-size:18px;font-weight:700;color:var(--primary)}
+#mobileHeader button{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text);padding:4px;line-height:1}
+#mobileNav{display:none;position:fixed;top:0;left:0;bottom:0;width:220px;background:var(--surface);z-index:200;box-shadow:var(--shadow-lg);flex-direction:column;padding:20px 16px;transform:translateX(-100%);transition:transform .25s ease}
+#mobileNav.open{display:flex;transform:translateX(0)}
+#mobileNav .nav-item{font-size:15px;padding:12px 14px}
+#mobileNav .nav-item span:first-child{font-size:18px}
+#mobileOverlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:150}
+#mobileOverlay.show{display:block}
+body.fp-fullscreen #mobileHeader{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="mobileHeader">
+    <button id="mobileMenuBtn">☰</button>
+    <h1>TaskFlow</h1>
+    <button id="mobileThemeBtn">🌙</button>
+  </div>
+  <div id="mobileOverlay"></div>
+  <nav id="mobileNav">
+    <div style="font-size:20px;font-weight:700;color:var(--primary);margin-bottom:28px">TaskFlow</div>
+    <button class="nav-item active" data-view="tasks"><span>📋</span><span>タスク</span></button>
+    <button class="nav-item" data-view="calendar"><span>📅</span><span>カレンダー</span></button>
+    <button class="nav-item" data-view="notes"><span>📝</span><span>メモ</span></button>
+    <button class="nav-item" data-view="files"><span>📁</span><span>ファイル</span></button>
+    <button class="nav-item" data-view="freepages"><span>📄</span><span>フリースペース</span></button>
+    <button class="nav-item" data-view="settings"><span>⚙️</span><span>設定</span></button>
+  </nav>
+  <aside id="sidebar">
+    <div class="sidebar-header"><h1>TaskFlow</h1></div>
+    <nav>
+      <button class="nav-item active" data-view="tasks"><span>📋</span><span>タスク</span></button>
+      <button class="nav-item" data-view="calendar"><span>📅</span><span>カレンダー</span></button>
+      <button class="nav-item" data-view="notes"><span>📝</span><span>メモ</span></button>
+      <button class="nav-item" data-view="files"><span>📁</span><span>ファイル</span></button>
+      <button class="nav-item" data-view="freepages"><span>📄</span><span>フリースペース</span></button>
+      <button class="nav-item" data-view="settings"><span>⚙️</span><span>設定</span></button>
+    </nav>
+    <div class="sidebar-sync" id="syncStatus">
+      <span class="sync-dot offline" id="syncDot"></span>
+      <span id="syncText">未接続</span>
+    </div>
+    <div class="sidebar-footer">
+      <button id="themeToggle"><span>🌙</span><span>ダークモード</span></button>
+      <button id="exportBtn"><span>💾</span><span>エクスポート</span></button>
+      <button id="importBtn"><span>📂</span><span>インポート</span></button>
+      <input type="file" id="importFile" accept=".json" hidden>
+    </div>
+  </aside>
+  <main id="main">
+    <!-- Tasks -->
+    <section id="tasksView" class="view active">
+      <div class="view-header">
+        <h2>📋 タスク管理</h2>
+        <div class="view-actions">
+          <select id="taskFilter"><option value="all">すべて</option><option value="high">優先度:高</option><option value="medium">優先度:中</option><option value="low">優先度:低</option></select>
+          <button class="btn-primary" id="addTaskBtn">＋ 新規タスク</button>
+        </div>
+      </div>
+      <div class="kanban-board">
+        <div class="kanban-column" data-status="todo">
+          <div class="column-header" style="color:var(--todo-color)">🟡 未着手</div>
+          <div class="column-body" id="todoColumn"></div>
+        </div>
+        <div class="kanban-column" data-status="doing">
+          <div class="column-header" style="color:var(--doing-color)">🔵 進行中</div>
+          <div class="column-body" id="doingColumn"></div>
+        </div>
+        <div class="kanban-column" data-status="done">
+          <div class="column-header" style="color:var(--done-color)">🟢 完了</div>
+          <div class="column-body" id="doneColumn"></div>
+        </div>
+      </div>
+    </section>
+    <!-- Calendar -->
+    <section id="calendarView" class="view">
+      <div class="view-header">
+        <h2>📅 カレンダー</h2>
+        <div class="view-actions">
+          <select id="calSelector" class="cal-selector"></select>
+          <button class="btn-primary" id="addEventBtn">＋ 予定追加</button>
+        </div>
+      </div>
+      <div class="cal-nav">
+        <button id="prevMonth">◀</button>
+        <h3 id="calTitle"></h3>
+        <button id="nextMonth">▶</button>
+        <button id="todayBtn" class="btn-secondary" style="margin-left:auto">今日</button>
+      </div>
+      <div id="calendarGrid"></div>
+      <div class="cal-legend">📋 タスク期限 &nbsp;|&nbsp; 🎨 カレンダー予定 &nbsp;|&nbsp; 🔄 繰り返し展開</div>
+    </section>
+    <!-- Notes -->
+    <section id="notesView" class="view">
+      <div class="view-header">
+        <h2>📝 メモ</h2>
+        <div class="view-actions">
+          <input type="text" id="noteSearch" placeholder="メモを検索..." style="width:200px">
+          <button class="btn-primary" id="addNoteBtn">＋ 新規メモ</button>
+        </div>
+      </div>
+      <div id="notesGrid" class="notes-grid"></div>
+    </section>
+    <!-- Files -->
+    <section id="filesView" class="view">
+      <div class="view-header">
+        <h2>📁 ファイル</h2>
+        <div class="view-actions files-header">
+          <input type="text" id="fileSearch" placeholder="ファイル名で検索...">
+          <button class="btn-primary" id="addFileBtn">＋ ファイル追加</button>
+          <input type="file" id="filePicker" multiple hidden>
+        </div>
+      </div>
+      <div class="files-drop-zone" id="fileDropZone">📁 ここにファイルをドロップするか、「ファイル追加」をクリック</div>
+      <div id="filesGrid" class="files-grid"></div>
+    </section>
+    <!-- Free Space -->
+    <section id="freepagesView" class="view">
+      <div class="view-header">
+        <h2>📄 フリースペース</h2>
+        <div class="view-actions">
+          <button class="btn-primary" id="addFreepageBtn">＋ 新規ページ</button>
+        </div>
+      </div>
+      <div id="freepageContainer">
+        <div id="freepageTabBar"></div>
+        <div id="freepageToolbar">
+          <button id="fpBold"><b>B</b></button>
+          <button id="fpItalic" style="font-style:italic">I</button>
+          <span class="toolbar-label">フォント</span>
+          <select id="fpFont">
+            <option value="Arial">Arial</option>
+            <option value="'Times New Roman'">Times New Roman</option>
+            <option value="'Courier New'">Courier New</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Verdana">Verdana</option>
+            <option value="'Segoe UI'">Segoe UI</option>
+            <option value="'Yu Gothic'">Yu Gothic</option>
+            <option value="'MS Mincho'">MS Mincho</option>
+          </select>
+          <span class="toolbar-label">サイズ</span>
+          <select id="fpFontSize">
+            <option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option>
+            <option value="12" selected>12</option><option value="14">14</option><option value="16">16</option>
+            <option value="18">18</option><option value="20">20</option><option value="24">24</option>
+            <option value="28">28</option><option value="32">32</option><option value="36">36</option><option value="48">48</option><option value="72">72</option>
+          </select>
+          <span class="toolbar-label">文字色</span>
+          <span class="color-wrap"><input type="color" id="fpTextColor" value="#000000"></span>
+          <span class="toolbar-label">マーカー</span>
+          <span class="color-wrap"><input type="color" id="fpHiliteColor" value="#ffff00"></span>
+          <span style="flex:1"></span>
+          <button id="fpFullscreenBtn">⛶</button>
+        </div>
+        <div id="freepageContent" contenteditable="true"></div>
+      </div>
+    </section>
+    <!-- Settings -->
+    <section id="settingsView" class="view">
+      <div class="view-header"><h2>⚙️ 設定</h2></div>
+      <div class="settings-grid">
+        <div class="settings-section">
+          <h3>📅 カレンダー管理</h3>
+          <div id="calendarMgmtList"></div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <input type="text" id="newCalName" placeholder="カレンダー名" style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);font-size:13px">
+            <input type="color" id="newCalColor" value="#4f46e5" style="width:36px;height:36px;border:2px solid var(--border);border-radius:6px;padding:0;background:none;cursor:pointer">
+            <button class="btn-primary" id="addCalBtn">作成</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>☁️ クラウド同期</h3>
+          <div class="setting-row">
+            <div><div class="setting-label">自動同期</div><div class="setting-desc">PCとスマホでデータを共有</div></div>
+            <label class="toggle"><input type="checkbox" id="syncAuto" checked><span class="slider"></span></label>
+          </div>
+          <div class="setting-row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start">
+            <button class="btn-secondary" id="syncForceBtn">☁️ 今すぐ同期</button>
+            <span id="syncStatusText" style="font-size:12px;color:var(--text-secondary);margin-left:8px"></span>
+          </div>
+          <div style="font-size:11px;color:var(--text-secondary);padding:8px 0">🟢 同期中 ｜ 設定不要。HTMLを開くだけで自動的にデータが共有されます</div>
+        </div>
+        <div class="settings-section">
+          <h3>🔔 通知設定</h3>
+          <div class="setting-row">
+            <div><div class="setting-label">デスクトップ通知</div></div>
+            <label class="toggle"><input type="checkbox" id="notifyEnabled"><span class="slider"></span></label>
+          </div>
+          <div class="setting-row">
+            <div><div class="setting-label">通知タイミング</div></div>
+            <div class="setting-input"><input type="number" id="notifyBefore" min="1" max="1440"> 分前</div>
+          </div>
+          <div class="setting-row">
+            <div><div class="setting-label">チェック間隔</div></div>
+            <div class="setting-input"><input type="number" id="notifyInterval" min="5" max="600"> 秒</div>
+          </div>
+          <div class="setting-row">
+            <div><div class="setting-label">再通知間隔</div></div>
+            <div class="setting-input"><input type="number" id="notifyRenotify" min="1" max="1440"> 分</div>
+          </div>
+          <div class="setting-row">
+            <div><div class="setting-label">通知文言</div></div>
+            <div class="setting-input"><select id="notifyStyle"><option value="due">期限迫る</option><option value="overdue">期限超過</option><option value="both">両方</option></select></div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>🎨 優先度の色</h3>
+          <div class="color-picker-group">
+            <label>高 <input type="color" id="colorHigh"></label>
+            <label>中 <input type="color" id="colorMedium"></label>
+            <label>低 <input type="color" id="colorLow"></label>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>📅 デフォルトの繰り返し</h3>
+          <div class="setting-row">
+            <div><div class="setting-label">タスク作成時の初期値</div></div>
+            <div class="setting-input">
+              <select id="defaultRepeat">
+                <option value="">なし</option><option value="daily">毎日</option><option value="weekly:1,3,5">毎週(月水金)</option>
+                <option value="monthlyDate:1">毎月(日付)</option><option value="monthlyWeek:1,1">毎月(曜日)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div style="text-align:right"><button class="btn-secondary" id="clearAllData">🗑️ 全データ削除</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+<!-- Task Modal -->
+<div class="modal-overlay" id="taskModal">
+  <div class="modal">
+    <h3 id="taskModalTitle">新規タスク</h3>
+    <div class="form-group"><label>タイトル</label><input type="text" id="taskTitle" placeholder="タスク名を入力"></div>
+    <div class="form-group"><label>説明</label><textarea id="taskDesc" placeholder="説明を入力（任意）"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>期限</label><input type="date" id="taskDue"></div>
+      <div class="form-group"><label>時刻</label><input type="time" id="taskTime"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>優先度</label><select id="taskPriority"><option value="medium">中</option><option value="high">高</option><option value="low">低</option></select></div>
+      <div class="form-group"><label>ステータス</label><select id="taskStatus"><option value="todo">未着手</option><option value="doing">進行中</option><option value="done">完了</option></select></div>
+    </div>
+    <div class="form-group">
+      <label>繰り返し</label>
+      <div id="taskRepeatSelector" class="repeat-selector">
+        <button class="repeat-btn active" data-value="">なし</button>
+        <button class="repeat-btn" data-value="daily">毎日</button>
+        <button class="repeat-btn" data-value="weekly">毎週</button>
+        <button class="repeat-btn" data-value="monthlyDate">毎月(日付)</button>
+        <button class="repeat-btn" data-value="monthlyWeek">毎月(曜日)</button>
+      </div>
+      <div id="taskRepeatWeekdays" class="weekday-grid" style="display:none;margin-top:8px"></div>
+      <div id="taskRepeatMonthlyWeek" class="monthly-week-picker" style="display:none;margin-top:8px">
+        <select id="taskRepeatMWWeek"><option value="1">第1</option><option value="2">第2</option><option value="3">第3</option><option value="4">第4</option><option value="-1">最終</option></select>
+        <select id="taskRepeatMWDay"><option value="0">日</option><option value="1">月</option><option value="2">火</option><option value="3">水</option><option value="4">木</option><option value="5">金</option><option value="6">土</option></select>
+      </div>
+      <div id="taskRepeatMonthlyDate" style="display:none;margin-top:8px">
+        <label>毎月 <input type="number" id="taskRepeatMDDay" min="1" max="31" value="1" style="width:70px"> 日</label>
+      </div>
+    </div>
+    <div class="form-group form-attachments">
+      <label>添付ファイル</label>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <button class="btn-secondary" id="taskAttachBtn" style="font-size:12px;padding:4px 12px">📎 ファイルを追加</button>
+        <input type="file" id="taskFilePicker" hidden>
+      </div>
+      <div class="attach-list" id="taskAttachList"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="taskModalCancel">キャンセル</button>
+      <button class="btn-primary" id="taskModalSave">保存</button>
+    </div>
+  </div>
+</div>
+<!-- Event Modal -->
+<div class="modal-overlay" id="eventModal">
+  <div class="modal">
+    <h3 id="eventModalTitle">新規予定</h3>
+    <div class="form-group"><label>タイトル</label><input type="text" id="eventTitle" placeholder="予定名を入力"></div>
+    <div class="form-group"><label>説明</label><textarea id="eventDesc" placeholder="説明を入力（任意）"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>開始日</label><input type="date" id="eventStart"></div>
+      <div class="form-group"><label>開始時刻</label><input type="time" id="eventStartTime"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>終了日</label><input type="date" id="eventEnd"></div>
+      <div class="form-group"><label>終了時刻</label><input type="time" id="eventEndTime"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>カレンダー</label><select id="eventCalendar"></select></div>
+      <div class="form-group"><label>色</label><input type="color" id="eventColor" value="#4f46e5"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label><input type="checkbox" id="eventAllDay" checked> 終日</label></div>
+    </div>
+    <div class="form-group">
+      <label>繰り返し</label>
+      <div id="eventRepeatSelector" class="repeat-selector">
+        <button class="repeat-btn active" data-value="">なし</button>
+        <button class="repeat-btn" data-value="daily">毎日</button>
+        <button class="repeat-btn" data-value="weekly">毎週</button>
+        <button class="repeat-btn" data-value="monthlyDate">毎月(日付)</button>
+        <button class="repeat-btn" data-value="monthlyWeek">毎月(曜日)</button>
+      </div>
+      <div id="eventRepeatWeekdays" class="weekday-grid" style="display:none;margin-top:8px"></div>
+      <div id="eventRepeatMonthlyWeek" class="monthly-week-picker" style="display:none;margin-top:8px">
+        <select id="eventRepeatMWWeek"><option value="1">第1</option><option value="2">第2</option><option value="3">第3</option><option value="4">第4</option><option value="-1">最終</option></select>
+        <select id="eventRepeatMWDay"><option value="0">日</option><option value="1">月</option><option value="2">火</option><option value="3">水</option><option value="4">木</option><option value="5">金</option><option value="6">土</option></select>
+      </div>
+      <div id="eventRepeatMonthlyDate" style="display:none;margin-top:8px">
+        <label>毎月 <input type="number" id="eventRepeatMDDay" min="1" max="31" value="1" style="width:70px"> 日</label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-danger" id="eventDeleteBtn" style="display:none;margin-right:auto">🗑️ 削除</button>
+      <button class="btn-secondary" id="eventModalCancel">キャンセル</button>
+      <button class="btn-primary" id="eventModalSave">保存</button>
+    </div>
+  </div>
+</div>
+<!-- Note Modal -->
+<div class="modal-overlay" id="noteModal">
+  <div class="modal">
+    <h3 id="noteModalTitle">新規メモ</h3>
+    <div class="form-group"><label>タイトル</label><input type="text" id="noteTitle" placeholder="メモのタイトル"></div>
+    <div class="form-group"><label>内容</label><textarea id="noteContent" placeholder="メモ内容を入力..." style="min-height:150px"></textarea></div>
+    <div class="form-group"><label>タグ（カンマ区切り）</label><input type="text" id="noteTags" placeholder="例: 仕事,アイデア,勉強"></div>
+    <div class="form-group form-attachments">
+      <label>添付ファイル</label>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <button class="btn-secondary" id="noteAttachBtn" style="font-size:12px;padding:4px 12px">📎 ファイルを追加</button>
+        <input type="file" id="noteFilePicker" hidden>
+      </div>
+      <div class="attach-list" id="noteAttachList"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="noteModalCancel">キャンセル</button>
+      <button class="btn-primary" id="noteModalSave">保存</button>
+    </div>
+  </div>
+</div>
+<!-- File Preview Modal -->
+<div class="modal-overlay file-preview-modal" id="filePreviewModal">
+  <div class="modal">
+    <div class="preview-header">
+      <div class="file-icon" id="previewIcon">📄</div>
+      <div class="file-details">
+        <div class="fname" id="previewName"></div>
+        <div class="finfo" id="previewMeta"></div>
+      </div>
+    </div>
+    <div class="preview-content" id="previewContent"></div>
+    <div class="preview-actions">
+      <button class="btn-secondary" id="previewClose">閉じる</button>
+      <button class="btn-primary" id="previewDownload" style="margin-left:auto">⬇ ダウンロード</button>
+    </div>
+  </div>
+</div>
+<!-- Confirm Modal -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal">
+    <h3 id="confirmTitle">確認</h3>
+    <p id="confirmMessage">削除してもよろしいですか？</p>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="confirmCancel">キャンセル</button>
+      <button class="btn-danger" id="confirmOk">削除する</button>
+    </div>
+  </div>
+</div>
+<div id="toastContainer"></div>
+<script>
+// ===== Dexie Database =====
+const db = new Dexie('TaskFlowDB')
+db.version(1).stores({
+  meta: 'key',
+  tasks: 'id, status, priority, dueDate, createdAt',
+  events: 'id, calendarId, startDate, createdAt',
+  notes: 'id, pinned, createdAt',
+  freepages: 'id, createdAt',
+  files: 'id, type, createdAt',
+  taskFiles: 'taskId, fileId',
+  noteFiles: 'noteId, fileId',
+  calendars: 'id'
+})
+
+// ===== Supabase Storage (direct fetch, no auth needed) =====
+const SB = {
+  url: 'https://usoxdvwiewfcmckqcifk.supabase.co',
+  key: 'sb_' + 'secret_X3-iO5ddNJ6OWRLE_QPOWQ_kmTRq5L_',
+  dataBucket: 'taskflow-data',
+  fileBucket: 'taskflow-files',
+  headers: function() { return { apikey: SB.key, Authorization: 'Bearer ' + SB.key } },
+  async uploadJson(path, json) {
+    var r = await fetch(SB.url + '/storage/v1/object/' + SB.dataBucket + '/' + path, {
+      method: 'POST', headers: Object.assign(SB.headers(), { 'Content-Type': 'application/json', 'x-upsert': 'true' }),
+      body: json
+    });
+    if (!r.ok) throw new Error('upload failed: ' + r.status);
+    return true;
+  },
+  async downloadJson(path) {
+    var r = await fetch(SB.url + '/storage/v1/object/' + SB.dataBucket + '/' + path, { headers: SB.headers() });
+    if (!r.ok) return null;
+    return await r.text();
+  },
+  async uploadFile(blob, path) {
+    var r = await fetch(SB.url + '/storage/v1/object/' + SB.fileBucket + '/' + path, {
+      method: 'POST', headers: Object.assign(SB.headers(), { 'Content-Type': blob.type || 'application/octet-stream', 'x-upsert': 'true' }),
+      body: blob
+    });
+    return r.ok;
+  },
+  async downloadFile(path) {
+    var r = await fetch(SB.url + '/storage/v1/object/' + SB.fileBucket + '/' + path, { headers: SB.headers() });
+    if (!r.ok) return null;
+    return await r.blob();
+  },
+  async deleteFile(path) {
+    var r = await fetch(SB.url + '/storage/v1/object/' + SB.fileBucket + '/' + path, {
+      method: 'DELETE', headers: SB.headers()
+    });
+    return r.ok;
+  }
+}
+
+// ===== Utils =====
+function fmtDateStr(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function fmtDate(iso){if(!iso)return '';var parts=iso.split('T'),d=new Date(parts[0]+'T00:00:00'),time=parts[1]?parts[1].slice(0,5):'',date=d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate();return time?date+' '+time:date}
+function todayStr(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function toast(msg,type){type=type||'success';var el=document.createElement('div');el.className='toast '+type;el.textContent=msg;document.getElementById('toastContainer').appendChild(el);setTimeout(function(){el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(function(){el.remove()},300)},2500)}
+function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
+function formatSize(bytes){if(bytes<1024)return bytes+'B';if(bytes<1048576)return (bytes/1024).toFixed(1)+'KB';return (bytes/1048576).toFixed(1)+'MB'}
+function getFileIcon(type){if(type.startsWith('image/'))return '🖼️';if(type.startsWith('video/'))return '🎬';if(type.startsWith('audio/'))return '🎵';if(type.includes('pdf'))return '📕';if(type.includes('word')||type.includes('document'))return '📝';if(type.includes('spreadsheet')||type.includes('excel'))return '📊';if(type.includes('zip')||type.includes('rar')||type.includes('tar'))return '🗜️';if(type.includes('text')||type.includes('javascript')||type.includes('json')||type.includes('html')||type.includes('css'))return '📄';return '📎'}
+function getFileExt(name){var i=name.lastIndexOf('.');return i>0?name.slice(i).toLowerCase():''}
+
+// ===== Parse Utils =====
+function parseRepeat(repeat){if(!repeat)return{type:''};var parts=repeat.split(':');return{type:parts[0],args:parts[1]?parts[1].split(',').map(Number):[]}}
+function repeatLabel(repeat){if(!repeat)return'';var p=parseRepeat(repeat);var days=['日','月','火','水','木','金','土'];if(p.type==='daily')return'毎日';if(p.type==='weekly')return'毎週('+p.args.map(function(d){return days[d]}).join('')+')';if(p.type==='monthlyDate')return'毎月'+p.args[0]+'日';if(p.type==='monthlyWeek'){var w=p.args[0]===-1?'最終':'第'+p.args[0];return'毎月'+w+days[p.args[1]]}return repeat}
+function nextRecurrence(repeat,fromDateStr){if(!repeat)return null;var p=parseRepeat(repeat),d=new Date(fromDateStr);switch(p.type){case'daily':d.setDate(d.getDate()+1);break;case'weekly':var days=p.args.length?p.args:[d.getDay()],found=false;for(var i=1;i<=7;i++){var n=new Date(d);n.setDate(d.getDate()+i);if(days.includes(n.getDay())){d.setDate(d.getDate()+i);found=true;break}}if(!found)return null;break;case'monthlyDate':var day=p.args[0]||d.getDate();d.setMonth(d.getMonth()+1);d.setDate(Math.min(day,new Date(d.getFullYear(),d.getMonth()+1,0).getDate()));break;case'monthlyWeek':var week=p.args[0]||1,targetDay=p.args[1]!==undefined?p.args[1]:d.getDay();d.setMonth(d.getMonth()+1);d.setDate(1);if(week===-1){d.setMonth(d.getMonth()+1,0);while(d.getDay()!==targetDay)d.setDate(d.getDate()-1)}else{while(d.getDay()!==targetDay)d.setDate(d.getDate()+1);d.setDate(d.getDate()+(week-1)*7)}break;default:return null}return fmtDateStr(d)}
+function expandRecurring(item,startDate,endDate,dateField){var res=[],dateVal=item[dateField];if(!item.repeat||!dateVal)return res;var cur=new Date(dateVal.split('T')[0]),end=new Date(endDate);while(cur<=end){var ds=fmtDateStr(cur);if(ds>=startDate)res.push(Object.assign({},item,{_recurDate:ds,_recurFrom:item.id}));var nxt=nextRecurrence(item.repeat,ds);if(!nxt)break;cur=new Date(nxt)}return res}
+
+// ===== Data Store =====
+var Data={_cache:{tasks:[],events:[],notes:[],freepages:[],files:[],calendars:[]},_ready:false,_saveTimer:null,_dirty:false,
+async init(){await this._loadAll();this._migrateOld();this._ready=true},
+async _loadAll(){try{this._cache.tasks=await db.tasks.toArray();this._cache.events=await db.events.toArray();this._cache.notes=await db.notes.toArray();this._cache.freepages=await db.freepages.toArray();this._cache.files=await db.files.toArray();this._cache.calendars=await db.calendars.toArray();var s=await db.meta.get('settings');this._settings=s?s.value:{}}catch(e){console.error('DB load failed',e);this._cache={tasks:[],events:[],notes:[],freepages:[],files:[],calendars:[]};this._settings={}}var defCal=this._cache.calendars.find(function(c){return c.id==='default'});if(!defCal){defCal={id:'default',name:'マイカレンダー',color:'#4f46e5',order:0};this._cache.calendars.push(defCal);await db.calendars.put(defCal)}},
+async _save(){if(!this._dirty)return;this._dirty=false;if(this._saveTimer){clearTimeout(this._saveTimer);this._saveTimer=null}try{await Promise.all([db.tasks.bulkPut(this._cache.tasks.filter(function(t){return t.id})),db.events.bulkPut(this._cache.events.filter(function(e){return e.id})),db.notes.bulkPut(this._cache.notes.filter(function(n){return n.id})),db.freepages.bulkPut(this._cache.freepages.filter(function(f){return f.id})),db.files.bulkPut(this._cache.files.filter(function(f){return f.id})),db.calendars.bulkPut(this._cache.calendars.filter(function(c){return c.id})),db.meta.put({key:'settings',value:this._settings})]);this._triggerSync()}catch(e){console.error('DB save failed',e)}},
+_scheduleSave(){this._dirty=true;if(!this._saveTimer)this._saveTimer=setTimeout(this._save.bind(this),100)},
+_migrateOld(){try{var raw=localStorage.getItem('taskflow_data_default');if(raw){var data=JSON.parse(raw);if(data.tasks&&data.tasks.length&&this._cache.tasks.length===0){this._cache.tasks=data.tasks.map(function(t){t.id=t.id||genId();return t});this._cache.events=(data.events||[]).map(function(e){e.id=e.id||genId();return e});this._cache.notes=(data.notes||[]).map(function(n){n.id=n.id||genId();return n});this._cache.freepages=(data.freepages||[]).map(function(f){f.id=f.id||genId();return f});if(data.calendars)this._cache.calendars=data.calendars;if(data.settings)this._settings=Object.assign(this._settings,data.settings);this._dirty=true;this._save();toast('旧データを移行しました','info');localStorage.removeItem('taskflow_data_default')}}}catch(e){console.error('Migration failed',e)}try{var jsonData=document.getElementById('__OLD_DATA__');if(jsonData){var data=JSON.parse(jsonData.textContent);if(data.tasks&&data.tasks.length&&this._cache.tasks.length===0){this._cache.tasks=data.tasks;this._cache.events=data.events||[];this._cache.notes=data.notes||[];this._cache.freepages=data.freepages||[];if(data.calendars)this._cache.calendars=data.calendars;if(data.settings)this._settings=Object.assign(this._settings,data.settings);this._dirty=true;this._save()}}}catch(e){}},
+get tasks(){return this._cache.tasks},get events(){return this._cache.events},get notes(){return this._cache.notes},get freepages(){return this._cache.freepages},get files(){return this._cache.files},get calendars(){return this._cache.calendars},get settings(){return this._settings},
+set settings(v){this._settings=v;this._scheduleSave()},
+addTask(t){t.id=t.id||genId();t.createdAt=t.createdAt||new Date().toISOString();if(!t.repeat)t.repeat='';this.tasks.push(t);this._scheduleSave();return t},
+updateTask(id,u){var i=this.tasks.findIndex(function(t){return t.id===id});if(i>-1){Object.assign(this.tasks[i],u);this._scheduleSave();return true}return false},
+deleteTask(id){var i=this.tasks.findIndex(function(t){return t.id===id});if(i>-1){this.tasks.splice(i,1);this._scheduleSave();return true}return false},
+addEvent(e){e.id=e.id||genId();e.createdAt=e.createdAt||new Date().toISOString();if(!e.calendarId)e.calendarId=(this.calendars[0]&&this.calendars[0].id)||'default';if(!e.repeat)e.repeat='';this.events.push(e);this._scheduleSave();return e},
+updateEvent(id,u){var i=this.events.findIndex(function(e){return e.id===id});if(i>-1){Object.assign(this.events[i],u);this._scheduleSave();return true}return false},
+deleteEvent(id){var i=this.events.findIndex(function(e){return e.id===id});if(i>-1){this.events.splice(i,1);this._scheduleSave();return true}return false},
+addNote(n){n.id=n.id||genId();n.createdAt=n.createdAt||new Date().toISOString();if(!n.tags)n.tags=[];this.notes.push(n);this._scheduleSave();return n},
+updateNote(id,u){var i=this.notes.findIndex(function(n){return n.id===id});if(i>-1){Object.assign(this.notes[i],u);this._scheduleSave();return true}return false},
+deleteNote(id){var i=this.notes.findIndex(function(n){return n.id===id});if(i>-1){this.notes.splice(i,1);this._scheduleSave();return true}return false},
+addFreepage(fp){fp.id=fp.id||genId();fp.createdAt=fp.createdAt||new Date().toISOString();this.freepages.push(fp);this._scheduleSave();return fp},
+updateFreepage(id,u){var i=this.freepages.findIndex(function(f){return f.id===id});if(i>-1){Object.assign(this.freepages[i],u);this._scheduleSave();return true}return false},
+deleteFreepage(id){var i=this.freepages.findIndex(function(f){return f.id===id});if(i>-1){this.freepages.splice(i,1);this._scheduleSave();return true}return false},
+addFile(file){file.id=file.id||genId();file.createdAt=file.createdAt||new Date().toISOString();this.files.push(file);this._scheduleSave();return file},
+deleteFile(id){var i=this.files.findIndex(function(f){return f.id===id});if(i>-1){this.files.splice(i,1);db.files.delete(id);this._scheduleSave();return true}return false},
+addCalendar(c){c.id=c.id||genId();this.calendars.push(c);this._scheduleSave();return c},
+updateCalendar(id,u){var i=this.calendars.findIndex(function(c){return c.id===id});if(i>-1){Object.assign(this.calendars[i],u);this._scheduleSave();return true}return false},
+deleteCalendar(id){if(id==='default')return false;this.events.forEach(function(e){if(e.calendarId===id)e.calendarId='default'});var i=this.calendars.findIndex(function(c){return c.id===id});if(i>-1){this.calendars.splice(i,1);this._scheduleSave();return true}return false},
+getSetting(key,def){return this._settings[key]!==undefined?this._settings[key]:def},
+setSetting(key,val){this._settings[key]=val;this._scheduleSave()},
+// File data (blob) storage
+async putFileData(id,blob){try{await db.files.put({id:id,_data:blob});return true}catch(e){return false}},
+async getFileData(id){try{var f=await db.files.get(id);return f&&f._data?f._data:null}catch(e){return null}},
+async getTaskFiles(taskId){try{var links=await db.taskFiles.where('taskId').equals(taskId).toArray();var fileIds=links.map(function(l){return l.fileId});return this.files.filter(function(f){return fileIds.includes(f.id)})}catch(e){return[]}},
+async attachFileToTask(taskId,fileId){try{await db.taskFiles.put({taskId:taskId,fileId:fileId});return true}catch(e){return false}},
+async detachFileFromTask(taskId,fileId){try{await db.taskFiles.where({taskId:taskId,fileId:fileId}).delete();return true}catch(e){return false}},
+async getNoteFiles(noteId){try{var links=await db.noteFiles.where('noteId').equals(noteId).toArray();var fileIds=links.map(function(l){return l.fileId});return this.files.filter(function(f){return fileIds.includes(f.id)})}catch(e){return[]}},
+async attachFileToNote(noteId,fileId){try{await db.noteFiles.put({noteId:noteId,fileId:fileId});return true}catch(e){return false}},
+async detachFileFromNote(noteId,fileId){try{await db.noteFiles.where({noteId:noteId,fileId:fileId}).delete();return true}catch(e){return false}},
+async getAllData(){return{tasks:this.tasks,events:this.events,notes:this.notes,freepages:this.freepages,files:this.files,calendars:this.calendars,settings:this._settings,theme:this._theme,_syncTime:Date.now()}},
+async importAllData(data){if(!data.tasks)return false;this._cache.tasks=data.tasks||[];this._cache.events=data.events||[];this._cache.notes=data.notes||[];this._cache.freepages=data.freepages||[];this._cache.files=data.files||[];this._cache.calendars=data.calendars||[{id:'default',name:'マイカレンダー',color:'#4f46e5',order:0}];this._settings=data.settings||{};this._dirty=true;await this._save();return true},
+_theme:'light',get theme(){return this._theme},set theme(v){this._theme=v;this._scheduleSave()},
+_triggerSync(){if(Sync&&Sync.enabled)Sync.schedule()}
+}
+
+// ===== Cloud Sync (Supabase Storage direct) =====
+var Sync={enabled:true,_timer:null,_syncTimer:null,_syncing:false,_lastSync:0,
+init(){this._updateStatus('offline');this.enabled=true;this.startAutoSync()},
+async push(){if(this._syncing)return;this._syncing=true;this._updateStatus('syncing');try{var data=await Data.getAllData();await SB.uploadJson('data.json',JSON.stringify(data));this._lastSync=Date.now();this._updateStatus('online')}catch(e){console.error('Sync push failed',e);this._updateStatus('offline')}finally{this._syncing=false}},
+async pull(){if(this._syncing)return;this._syncing=true;this._updateStatus('syncing');try{var text=await SB.downloadJson('data.json');if(!text){this._updateStatus('online');return false}var data=JSON.parse(text);if(data.tasks){await Data.importAllData(data);this._lastSync=Date.now();this._updateStatus('online');return true}return false}catch(e){console.error('Sync pull failed',e);this._updateStatus('offline');return false}finally{this._syncing=false}},
+async sync(){if(!this.enabled)return;try{var text=await SB.downloadJson('data.json');if(text){var data=JSON.parse(text);if(data.tasks&&data.tasks.length>0&&Data.tasks.length===0){await Data.importAllData(data);this._updateStatus('online');return}}await this.push()}catch(e){this._updateStatus('offline')}},
+schedule(){if(this._timer)clearTimeout(this._timer);this._timer=setTimeout(this.sync.bind(this),1000)},
+startAutoSync(){this.enabled=true;if(this._syncTimer)clearInterval(this._syncTimer);this._syncTimer=setInterval(this.sync.bind(this),10000);setTimeout(this.sync.bind(this),500)},
+stopAutoSync(){this.enabled=false;if(this._syncTimer)clearInterval(this._syncTimer)},
+_updateStatus(status){var dot=document.getElementById('syncDot');var txt=document.getElementById('syncText');if(!dot||!txt)return;dot.className='sync-dot '+(status||'offline');txt.textContent=status==='online'?'同期済み':status==='syncing'?'同期中...':'オフライン'},
+async uploadFile(blob,path){try{return await SB.uploadFile(blob,path)}catch(e){return false}},
+async downloadFile(path){try{return await SB.downloadFile(path)}catch(e){return null}},
+async deleteCloudFile(path){try{await SB.deleteFile(path)}catch(e){}}
+}
+
+// ===== State =====
+var State={currentView:'tasks',calMonth:new Date().getMonth(),calYear:new Date().getFullYear(),taskFilter:'all',noteSearch:'',fileSearch:'',editId:null,editType:null,confirmCallback:null,notifiedIds:[],lastNotified:{},_freepageCurrentId:null,_fpFullscreen:false,_taskAttachIds:[],_noteAttachIds:[]}
+
+// ===== Repeat UI Factory =====
+function createRepeatControls(prefix){var ids={selector:prefix+'RepeatSelector',weekdays:prefix+'RepeatWeekdays',monthlyWeek:prefix+'RepeatMonthlyWeek',monthlyDate:prefix+'RepeatMonthlyDate',mwWeek:prefix+'RepeatMWWeek',mwDay:prefix+'RepeatMWDay',mdDay:prefix+'RepeatMDDay'};var DAYS=['日','月','火','水','木','金','土'];var _selected='',_weekdays=[],_mwWeek=1,_mwDay=1,_mdDay=1;function init(){var container=document.getElementById(ids.weekdays);if(!container)return;container.innerHTML=DAYS.map(function(l,i){return'<button class="weekday-btn" data-day="'+i+'">'+l+'</button>'}).join('');container.querySelectorAll('.weekday-btn').forEach(function(btn){btn.addEventListener('click',function(){var day=parseInt(btn.dataset.day),idx=_weekdays.indexOf(day);if(idx>-1)_weekdays.splice(idx,1);else _weekdays.push(day);_weekdays.sort();update()})});document.querySelectorAll('#'+ids.selector+' .repeat-btn').forEach(function(btn){btn.addEventListener('click',function(){_selected=btn.dataset.value;if(_selected!=='weekly')_weekdays=[];if(_selected!=='monthlyWeek'){_mwWeek=1;_mwDay=1}if(_selected!=='monthlyDate')_mdDay=1;update()})})}function update(){document.querySelectorAll('#'+ids.selector+' .repeat-btn').forEach(function(b){b.classList.toggle('active',b.dataset.value===_selected)});var w1=document.getElementById(ids.weekdays),w2=document.getElementById(ids.monthlyWeek),w3=document.getElementById(ids.monthlyDate);if(w1)w1.style.display=_selected==='weekly'?'flex':'none';if(w2)w2.style.display=_selected==='monthlyWeek'?'flex':'none';if(w3)w3.style.display=_selected==='monthlyDate'?'block':'none';document.querySelectorAll('#'+ids.weekdays+' .weekday-btn').forEach(function(btn){btn.classList.toggle('active',_weekdays.includes(parseInt(btn.dataset.day)))});var mw=document.getElementById(ids.mwWeek),md=document.getElementById(ids.mwDay),mdd=document.getElementById(ids.mdDay);if(mw)mw.value=_mwWeek;if(md)md.value=_mwDay;if(mdd)mdd.value=_mdDay}function getValue(){if(!_selected)return'';if(_selected==='daily')return'daily';if(_selected==='weekly'){if(!_weekdays.length)return'';return'weekly:'+_weekdays.join(',')}if(_selected==='monthlyDate')return'monthlyDate:'+(parseInt(document.getElementById(ids.mdDay).value)||1);if(_selected==='monthlyWeek')return'monthlyWeek:'+document.getElementById(ids.mwWeek).value+','+document.getElementById(ids.mwDay).value;return''}function setValue(val){_weekdays=[];_mwWeek=1;_mwDay=1;_mdDay=1;if(!val){_selected='';update();return}var p=parseRepeat(val);_selected=p.type;if(p.type==='weekly')_weekdays=p.args;if(p.type==='monthlyDate')_mdDay=p.args[0]||1;if(p.type==='monthlyWeek'){_mwWeek=p.args[0]||1;_mwDay=p.args[1]||1}update()}return{init:init,update:update,getValue:getValue,setValue:setValue}}
+
+var taskRepeat=createRepeatControls('task')
+var eventRepeat=createRepeatControls('event')
+
+// ===== Theme =====
+function applyTheme(t){document.documentElement.classList.toggle('dark',t==='dark');var tb=document.querySelector('#themeToggle span:last-child');if(tb)tb.textContent=t==='dark'?'ライトモード':'ダークモード';var ti=document.querySelector('#themeToggle span:first-child');if(ti)ti.textContent=t==='dark'?'☀️':'🌙';var mtb=document.getElementById('mobileThemeBtn');if(mtb)mtb.textContent=t==='dark'?'☀️':'🌙'}
+function toggleTheme(){var n=Data.theme==='dark'?'light':'dark';Data.theme=n;applyTheme(n)}
+
+// ===== Render: Tasks =====
+function renderTasks(){var filter=State.taskFilter;var tasks=Data.tasks;if(filter!=='all')tasks=tasks.filter(function(t){return t.priority===filter});var cols={todo:tasks.filter(function(t){return t.status==='todo'}),doing:tasks.filter(function(t){return t.status==='doing'}),done:tasks.filter(function(t){return t.status==='done'})};['todo','doing','done'].forEach(function(st){var el=document.getElementById(st+'Column'),items=cols[st];if(!items.length){el.innerHTML='<div class="empty-column">タスクがありません<br>ドラッグ＆ドロップで移動</div>';return}el.innerHTML=items.map(function(t){return taskCardHTML(t)}).join('')});document.querySelectorAll('.task-card').forEach(function(card){card.addEventListener('dragstart',onDragStart);card.addEventListener('dragend',onDragEnd)});document.querySelectorAll('.column-body').forEach(function(col){col.addEventListener('dragover',onDragOver);col.addEventListener('drop',onDrop);col.addEventListener('dragenter',onDragEnter);col.addEventListener('dragleave',onDragLeave)})}
+
+function taskCardHTML(t){var pLabel={high:'高',medium:'中',low:'低'}[t.priority]||'中';var dueHtml=t.dueDate?'<span class="task-due">📅 '+fmtDate(t.dueDate)+'</span>':'';var repeatHtml=t.repeat?'<span class="task-repeat">🔄 '+repeatLabel(t.repeat)+'</span>':'';var attachIcon=t._attachCount?'📎'+t._attachCount+' ':'';return'<div class="task-card" draggable="true" data-id="'+t.id+'"><div class="task-title">'+attachIcon+esc(t.title)+'</div>'+(t.description?'<div class="task-desc">'+esc(t.description)+'</div>':'')+'<div class="task-meta"><span class="task-priority priority-'+t.priority+'">'+pLabel+'</span>'+dueHtml+repeatHtml+'</div><div class="task-actions"><button class="edit-btn" data-action="edit-task" data-id="'+t.id+'">✏️ 編集</button><button class="delete-btn" data-action="delete-task" data-id="'+t.id+'">🗑️ 削除</button></div></div>'}
+
+var dragId=null
+function onDragStart(e){dragId=e.target.closest('.task-card')?.dataset.id;if(dragId)e.target.classList.add('dragging');e.dataTransfer.effectAllowed='move'}
+function onDragEnd(e){e.target.classList.remove('dragging');document.querySelectorAll('.column-body').forEach(function(c){c.classList.remove('drag-over')});dragId=null}
+function onDragOver(e){e.preventDefault();e.dataTransfer.dropEffect='move'}
+function onDragEnter(e){e.preventDefault();var col=e.target.closest('.column-body');if(col)col.classList.add('drag-over')}
+function onDragLeave(e){var col=e.target.closest('.column-body');if(col&&!col.contains(e.relatedTarget))col.classList.remove('drag-over')}
+function onDrop(e){e.preventDefault();var col=e.target.closest('.column-body');if(!col||!dragId)return;col.classList.remove('drag-over');var status=col.closest('.kanban-column')?.dataset.status;if(!status)return;var task=Data.tasks.find(function(t){return t.id===dragId});if(task&&task.status!==status){Data.updateTask(dragId,{status:status});if(status==='done'&&task.repeat){var nxt=nextRecurrence(task.repeat,task.dueDate);if(nxt){var time=task.dueDate?.split('T')[1]||'';Data.addTask({title:task.title,description:task.description,dueDate:time?nxt+'T'+time:nxt,priority:task.priority,repeat:task.repeat,status:'todo'});toast('繰り返し: 次の期限 '+fmtDate(nxt),'info')}}toast('「'+task.title+'」を移動','info');renderTasks()}}
+
+// ===== Render: Calendar =====
+function renderCalendar(){var y=State.calYear,m=State.calMonth;document.getElementById('calTitle').textContent=y+'年'+(m+1)+'月';var firstDay=new Date(y,m,1).getDay(),daysInMonth=new Date(y,m+1,0).getDate(),today=todayStr(),monthStart=y+'-'+String(m+1).padStart(2,'0')+'-01',monthEnd=y+'-'+String(m+1).padStart(2,'0')+'-'+String(daysInMonth).padStart(2,'0');var calSelector=document.getElementById('calSelector'),selCalId=calSelector.value||'all';calSelector.innerHTML='<option value="all">📋 すべてのカレンダー</option>'+Data.calendars.map(function(c){return'<option value="'+c.id+'">'+esc(c.name)+'</option>'}).join('');var events=Data.events;if(selCalId!=='all')events=events.filter(function(e){return e.calendarId===selCalId});var allEvents=[];events.forEach(function(e){if(e.repeat){var expanded=expandRecurring(e,monthStart,monthEnd,'startDate');expanded.forEach(function(ex){var timePart=e.startDate.includes('T')?'T'+e.startDate.split('T')[1]:'';allEvents.push(Object.assign({},e,{_recurDate:ex._recurDate,_recurFrom:e.id,startDate:ex._recurDate+timePart}))})}else allEvents.push(e)});events=allEvents.filter(function(e){var d=new Date(e.startDate.split('T')[0]);return d.getFullYear()===y&&d.getMonth()===m});var tasks=Data.tasks.filter(function(t){return t.dueDate&&t.status!=='done'}),recurringTasks=[];tasks.forEach(function(t){if(t.repeat){var expanded=expandRecurring(t,monthStart,monthEnd,'dueDate');expanded.forEach(function(ex){if(ex._recurDate>=monthStart&&ex._recurDate<=monthEnd)recurringTasks.push(ex)})}});var monthTasks=tasks.filter(function(t){return !t.repeat}).concat(recurringTasks);var html='<div class="calendar-grid">';['日','月','火','水','木','金','土'].forEach(function(d){html+='<div class="cal-day-header">'+d+'</div>'});for(var i=0;i<firstDay;i++)html+='<div class="cal-day empty"></div>';for(var day=1;day<=daysInMonth;day++){var dateStr=y+'-'+String(m+1).padStart(2,'0')+'-'+String(day).padStart(2,'0'),isToday=dateStr===today,dayEvents=events.filter(function(e){return(e.startDate.split('T')[0])===dateStr}),dayTasks=monthTasks.filter(function(t){return(t._recurDate||t.dueDate.split('T')[0])===dateStr});html+='<div class="cal-day'+(isToday?' today':'')+'" data-date="'+dateStr+'">';html+='<span class="day-number">'+day+'</span>';dayEvents.forEach(function(e){var cal=Data.calendars.find(function(c){return c.id===e.calendarId}),bg=cal&&cal.color?cal.color:e.color,time=e.startDate?.split('T')[1]?e.startDate.split('T')[1].slice(0,5):'';html+='<div class="cal-event" style="background:'+bg+'" data-id="'+e.id+'" data-type="event">'+(time?time+' ':'')+esc(e.title)+'</div>'});dayTasks.forEach(function(t){var cls=t._recurDate?'cal-task cal-recurring':'cal-task',time=t.dueDate?.split('T')[1]?t.dueDate.split('T')[1].slice(0,5):'';html+='<div class="'+cls+'" data-id="'+t.id+'" data-recur="'+(t._recurFrom||'')+'" data-type="task">'+(t._recurDate?'🔄 ':'📋 ')+(time?time+' ':'')+esc(t.title)+'</div>'});html+='</div>'}html+='</div>';document.getElementById('calendarGrid').innerHTML=html;document.querySelectorAll('#calendarGrid .cal-event').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();var evt=Data.events.find(function(ev){return ev.id===el.dataset.id});if(evt)openEventModal(evt)})});document.querySelectorAll('#calendarGrid .cal-task').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();var id=el.dataset.recur||el.dataset.id,tsk=Data.tasks.find(function(t){return t.id===id});if(tsk)openTaskModal(tsk)})});document.querySelectorAll('#calendarGrid .cal-day:not(.empty)').forEach(function(el){el.addEventListener('click',function(e){if(e.target.closest('.cal-event')||e.target.closest('.cal-task'))return;document.getElementById('eventStart').value=this.dataset.date;document.getElementById('eventEnd').value=this.dataset.date;openEventModal(null)})})}
+
+// ===== Render: Notes =====
+function renderNotes(){var q=State.noteSearch.toLowerCase().trim(),notes=[].concat(Data.notes);if(q)notes=notes.filter(function(n){return n.title.toLowerCase().includes(q)||n.content.toLowerCase().includes(q)||(n.tags||[]).some(function(t){return t.toLowerCase().includes(q)})});notes.sort(function(a,b){if(a.pinned&&!b.pinned)return-1;if(!a.pinned&&b.pinned)return 1;return new Date(b.createdAt)-new Date(a.createdAt)});var grid=document.getElementById('notesGrid');if(!notes.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--text-secondary);font-size:14px">'+(q?'検索結果がありません':'メモがありません。「新規メモ」から作成')+'</div>';return}grid.innerHTML=notes.map(function(n){var date=fmtDate(n.createdAt),tags=(n.tags||[]).map(function(t){return'<span class="note-tag">'+esc(t)+'</span>'}).join('');return'<div class="note-card'+(n.pinned?' pinned':'')+'" data-id="'+n.id+'">'+(n.pinned?'<span class="pin-badge">📌</span>':'')+'<div class="note-title">'+esc(n.title)+'</div><div class="note-content">'+esc(n.content)+'</div>'+(tags?'<div class="note-tags">'+tags+'</div>':'')+'<div class="note-date">📅 '+date+'</div><div class="note-actions"><button class="pin-btn" data-action="pin-note" data-id="'+n.id+'">'+(n.pinned?'📌 解除':'📌 ピン')+'</button><button class="edit-btn" data-action="edit-note" data-id="'+n.id+'">✏️ 編集</button><button class="delete-btn" data-action="delete-note" data-id="'+n.id+'">🗑️ 削除</button></div></div>'}).join('')}
+
+// ===== Render: Files =====
+function renderFiles(){var q=State.fileSearch.toLowerCase().trim();var files=[].concat(Data.files);if(q)files=files.filter(function(f){return f.name.toLowerCase().includes(q)});files.sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});var grid=document.getElementById('filesGrid');if(!files.length){grid.innerHTML='<div class="file-empty">'+(q?'検索結果がありません':'ファイルがありません。ドラッグ＆ドロップで追加')+'</div>';return}grid.innerHTML=files.map(function(f){var icon=getFileIcon(f.type);return'<div class="file-card" data-id="'+f.id+'"><div class="file-preview">'+(f.type.startsWith('image/')?'<img src="'+f._url+'">':icon)+'</div><div class="file-info"><div class="file-name" title="'+esc(f.name)+'">'+esc(f.name)+'</div><div class="file-meta">'+formatSize(f.size)+' ・ '+fmtDate(f.createdAt)+'</div></div><div class="file-actions"><button class="dl-btn" data-action="preview-file" data-id="'+f.id+'">👁 プレビュー</button><button class="del-btn" data-action="delete-file" data-id="'+f.id+'">🗑️</button></div></div>'}).join('')}
+
+function updateFilePreviewUrls(){Data.files.forEach(function(f){if(f.type.startsWith('image/')){f._url=URL.createObjectURL(f._blob)}})} // called after load
+
+// ===== Render: Freepages =====
+function renderFreepages(){var pages=Data.freepages;if(!pages.length){var fp=Data.addFreepage({title:'ページ1',content:''});State._freepageCurrentId=fp.id}else if(!State._freepageCurrentId||!pages.find(function(p){return p.id===State._freepageCurrentId})){State._freepageCurrentId=pages[0].id}var tabBar=document.getElementById('freepageTabBar');tabBar.innerHTML=pages.map(function(p){return'<div class="freepage-tab'+(p.id===State._freepageCurrentId?' active':'')+'" data-id="'+p.id+'"><span class="tab-label" data-id="'+p.id+'">'+esc(p.title)+'</span><button class="tab-close-btn" data-id="'+p.id+'"'+(pages.length<=1?' disabled style="opacity:0.2"':'')+'>×</button></div>'}).join('');tabBar.insertAdjacentHTML('beforeend','<button id="freepageTabAdd" title="新規タブ">＋</button>');tabBar.querySelectorAll('.freepage-tab').forEach(function(el){el.addEventListener('click',function(e){if(e.target.closest('.tab-close-btn'))return;var id=el.dataset.id;if(id===State._freepageCurrentId)return;saveCurrentFreepageContent();State._freepageCurrentId=id;renderFreepages()})});tabBar.querySelectorAll('.tab-close-btn:not([disabled])').forEach(function(btn){btn.addEventListener('click',function(e){e.stopPropagation();var id=btn.dataset.id;if(pages.length<=1)return;showConfirm('「'+(pages.find(function(p){return p.id===id})?.title)+'」を削除しますか？',function(){Data.deleteFreepage(id);if(State._freepageCurrentId===id)State._freepageCurrentId=pages[0]?.id||null;renderFreepages();toast('ページを削除しました','info')})})});var addBtn=document.getElementById('freepageTabAdd');if(addBtn){addBtn.addEventListener('click',function(){var name=prompt('新しいページ名を入力してください:');if(name&&name.trim()){saveCurrentFreepageContent();var fp=Data.addFreepage({title:name.trim(),content:''});State._freepageCurrentId=fp.id;renderFreepages();toast('ページを作成しました','success')}})}tabBar.querySelectorAll('.tab-label').forEach(function(label){label.addEventListener('dblclick',function(e){e.stopPropagation();var id=label.dataset.id,current=label.textContent,newName=prompt('ページ名を入力してください:',current);if(newName&&newName.trim()&&newName.trim()!==current){Data.updateFreepage(id,{title:newName.trim()});renderFreepages()}})});var current=pages.find(function(p){return p.id===State._freepageCurrentId});var editor=document.getElementById('freepageContent');editor.innerHTML=current?current.content:''}
+function saveCurrentFreepageContent(){if(!State._freepageCurrentId)return;var content=document.getElementById('freepageContent').innerHTML;Data.updateFreepage(State._freepageCurrentId,{content:content})}
+function toggleFreepageFullscreen(){State._fpFullscreen=!State._fpFullscreen;document.body.classList.toggle('fp-fullscreen',State._fpFullscreen)}
+function setupFreepageFormatting(){var editor=document.getElementById('freepageContent');if(!editor)return;document.getElementById('fpBold').addEventListener('click',function(){editor.focus();document.execCommand('bold')});document.getElementById('fpItalic').addEventListener('click',function(){editor.focus();document.execCommand('italic')});document.getElementById('fpFont').addEventListener('change',function(){editor.focus();document.execCommand('fontName',false,this.value)});document.getElementById('fpFontSize').addEventListener('change',function(){editor.focus();document.execCommand('fontSize',false,'7');editor.querySelectorAll('font[size="7"]').forEach(function(el){el.removeAttribute('size');el.style.fontSize=this.value+'px'})});document.getElementById('fpTextColor').addEventListener('input',function(){editor.focus();document.execCommand('foreColor',false,this.value)});document.getElementById('fpHiliteColor').addEventListener('input',function(){editor.focus();document.execCommand('hiliteColor',false,this.value)});editor.addEventListener('input',function(){saveCurrentFreepageContent()})}
+
+// ===== Render: Settings =====
+function renderSettings(){var s=Data.settings;var e=function(id){return document.getElementById(id)};if(e('notifyEnabled'))e('notifyEnabled').checked=s.notifyEnabled;if(e('notifyBefore'))e('notifyBefore').value=s.notifyBefore;if(e('notifyInterval'))e('notifyInterval').value=s.notifyInterval;if(e('notifyRenotify'))e('notifyRenotify').value=s.notifyRenotify;if(e('notifyStyle'))e('notifyStyle').value=s.notifyStyle;if(e('defaultRepeat'))e('defaultRepeat').value=s.defaultRepeat||'';if(e('colorHigh'))e('colorHigh').value=s.colorHigh||'#ef4444';if(e('colorMedium'))e('colorMedium').value=s.colorMedium||'#f59e0b';if(e('colorLow'))e('colorLow').value=s.colorLow||'#6b7280';if(e('syncAuto'))e('syncAuto').checked=Sync.enabled;renderCalendarMgmt()}
+function renderCalendarMgmt(){var list=document.getElementById('calendarMgmtList');list.innerHTML=Data.calendars.map(function(c){return'<div class="cal-mgmt-item"><span class="cal-dot" style="background:'+c.color+'"></span><span class="cal-name">'+esc(c.name)+'</span><button class="edit-btn" data-action="rename-cal" data-cal-id="'+c.id+'">✏️</button><input type="color" value="'+c.color+'" data-cal-id="'+c.id+'" style="width:28px;height:28px;border:1px solid var(--border);border-radius:4px;padding:0;background:none;cursor:pointer"><button class="delete-btn" data-cal-id="'+c.id+'"'+(c.id==='default'?' disabled title="削除できません"':'')+'>🗑️</button></div>'}).join('');list.querySelectorAll('input[type="color"]').forEach(function(inp){inp.addEventListener('input',function(){Data.updateCalendar(inp.dataset.calId,{color:inp.value});if(State.currentView==='calendar')renderCalendar()})});list.querySelectorAll('[data-action="rename-cal"]').forEach(function(btn){btn.addEventListener('click',function(){var id=btn.dataset.calId,cal=Data.calendars.find(function(c){return c.id===id});if(!cal)return;var newName=prompt('カレンダー名を入力してください:',cal.name);if(newName&&newName.trim()&&newName.trim()!==cal.name){Data.updateCalendar(id,{name:newName.trim()});renderSettings();if(State.currentView==='calendar')renderCalendar();toast('カレンダー名を変更しました','success')}})});list.querySelectorAll('.delete-btn').forEach(function(btn){btn.addEventListener('click',function(){var id=btn.dataset.calId;if(id==='default')return;showConfirm('カレンダー「'+(Data.calendars.find(function(c){return c.id===id})?.name)+'」を削除しますか？予定はデフォルトに移動します',function(){Data.deleteCalendar(id);renderSettings();if(State.currentView==='calendar')renderCalendar()})})})}
+
+function applyPriorityColors(){var s=Data.settings;document.documentElement.style.setProperty('--high-color',s.colorHigh||'#ef4444');document.documentElement.style.setProperty('--medium-color',s.colorMedium||'#f59e0b');document.documentElement.style.setProperty('--low-color',s.colorLow||'#6b7280')}
+
+// ===== Notifications =====
+function checkNotifications(){var s=Data.settings;if(!s.notifyEnabled)return;var now=new Date(),notifyMs=(s.notifyBefore||60)*60*1000,renotifyMs=(s.notifyRenotify||10)*60*1000,today=todayStr();Data.tasks.forEach(function(t){if(!t.dueDate||t.status==='done')return;var dueStr=t.dueDate.split('T')[0],timeStr=t.dueDate.split('T')[1]||'23:59',due=new Date(dueStr+'T'+timeStr+':00'),diff=due.getTime()-now.getTime(),lastNotified=State.lastNotified[t.id]||0,timeSinceLast=now.getTime()-lastNotified;var shouldNotify=function(style,isOverdue){if(style==='both')return true;if(isOverdue)return style==='overdue';return style==='due'};if(diff<0&&dueStr<=today){if(shouldNotify(s.notifyStyle,true)&&timeSinceLast>=renotifyMs){if(State.notifiedIds.includes(t.id)&&timeSinceLast<renotifyMs)return;showNotification('「'+t.title+'」の期限が過ぎています');State.notifiedIds.push(t.id);State.lastNotified[t.id]=now.getTime()}}else if(diff>0&&diff<=notifyMs&&dueStr>=today){if(shouldNotify(s.notifyStyle,false)&&timeSinceLast>=renotifyMs){var minLeft=Math.round(diff/60000);showNotification('「'+t.title+'」の期限まであと'+minLeft+'分');State.notifiedIds.push(t.id);State.lastNotified[t.id]=now.getTime()}}})}
+function showNotification(body){if(!('Notification'in window))return;if(Notification.permission==='granted'){new Notification('TaskFlow',{body:body})}else if(Notification.permission!=='denied'){Notification.requestPermission()}}
+
+// ===== Modals =====
+function openTaskModal(task){State.editType='task';State.editId=task?task.id:null;State._taskAttachIds=[];document.getElementById('taskModalTitle').textContent=task?'タスクを編集':'新規タスク';document.getElementById('taskTitle').value=task?task.title:'';document.getElementById('taskDesc').value=task?(task.description||''):'';var due=task?(task.dueDate||''):'',dueParts=due?due.split('T'):['',''];document.getElementById('taskDue').value=dueParts[0]||'';document.getElementById('taskTime').value=dueParts[1]||'';document.getElementById('taskPriority').value=task?(task.priority||'medium'):'medium';document.getElementById('taskStatus').value=task?(task.status||'todo'):'todo';taskRepeat.setValue(task?(task.repeat||''):(Data.settings.defaultRepeat||''));renderTaskAttachments(task);document.getElementById('taskModal').classList.add('show')}
+function closeTaskModal(){document.getElementById('taskModal').classList.remove('show')}
+function saveTask(){var title=document.getElementById('taskTitle').value.trim();if(!title){toast('タイトルを入力してください','error');return}var dueDate=document.getElementById('taskDue').value,dueTime=document.getElementById('taskTime').value,due=dueDate?(dueTime?dueDate+'T'+dueTime:dueDate):null;var data={title:title,description:document.getElementById('taskDesc').value.trim(),dueDate:due,priority:document.getElementById('taskPriority').value,status:document.getElementById('taskStatus').value,repeat:taskRepeat.getValue()};if(State.editId){Data.updateTask(State.editId,data);toast('タスクを更新しました','success')}else{Data.addTask(data);toast('タスクを作成しました','success')}closeTaskModal();renderTasks();State.notifiedIds=[]}
+
+function renderTaskAttachments(task){var list=document.getElementById('taskAttachList');if(task){Data.getTaskFiles(task.id).then(function(files){list.innerHTML=files.map(function(f){return'<span class="attach-item">'+getFileIcon(f.type)+' '+esc(f.name)+'<span class="remove-attach" data-file="'+f.id+'">×</span></span>'}).join('');list.querySelectorAll('.remove-attach').forEach(function(el){el.addEventListener('click',function(){var fid=el.dataset.file;Data.detachFileFromTask(task.id,fid);renderTaskAttachments(task)})})})}else{list.innerHTML=''}}
+
+function openEventModal(event){State.editType='event';State.editId=event?event.id:null;document.getElementById('eventModalTitle').textContent=event?'予定を編集':'新規予定';document.getElementById('eventTitle').value=event?event.title:'';document.getElementById('eventDesc').value=event?(event.description||''):'';var s=event?(event.startDate||''):todayStr(),e=event?(event.endDate||''):todayStr(),sParts=s.split('T'),eParts=e.split('T');document.getElementById('eventStart').value=sParts[0]||'';document.getElementById('eventStartTime').value=sParts[1]||'';document.getElementById('eventEnd').value=eParts[0]||'';document.getElementById('eventEndTime').value=eParts[1]||'';document.getElementById('eventColor').value=event?(event.color||'#4f46e5'):'#4f46e5';document.getElementById('eventAllDay').checked=event?event.allDay:true;var sel=document.getElementById('eventCalendar');sel.innerHTML=Data.calendars.map(function(c){return'<option value="'+c.id+'" '+((event&&event.calendarId===c.id)||(!event&&c.id==='default')?'selected':'')+'>'+esc(c.name)+'</option>'}).join('');document.getElementById('eventDeleteBtn').style.display=event?'block':'none';eventRepeat.setValue(event?(event.repeat||''):'');document.getElementById('eventModal').classList.add('show')}
+function closeEventModal(){document.getElementById('eventModal').classList.remove('show')}
+function saveEvent(){var title=document.getElementById('eventTitle').value.trim();if(!title){toast('タイトルを入力してください','error');return}var startDate=document.getElementById('eventStart').value,startTime=document.getElementById('eventStartTime').value,endDate=document.getElementById('eventEnd').value,endTime=document.getElementById('eventEndTime').value;var data={title:title,description:document.getElementById('eventDesc').value.trim(),startDate:startDate+(startTime?'T'+startTime:''),endDate:endDate+(endTime?'T'+endTime:''),color:document.getElementById('eventColor').value,allDay:document.getElementById('eventAllDay').checked,calendarId:document.getElementById('eventCalendar').value,repeat:eventRepeat.getValue()};if(State.editId){Data.updateEvent(State.editId,data);toast('予定を更新しました','success')}else{Data.addEvent(data);toast('予定を作成しました','success')}closeEventModal();renderCalendar()}
+function deleteEvent(){if(!State.editId)return;showConfirm('この予定を削除してもよろしいですか？',function(){Data.deleteEvent(State.editId);toast('予定を削除しました','info');closeEventModal();renderCalendar()})}
+function openNoteModal(note){State.editType='note';State.editId=note?note.id:null;State._noteAttachIds=[];document.getElementById('noteModalTitle').textContent=note?'メモを編集':'新規メモ';document.getElementById('noteTitle').value=note?note.title:'';document.getElementById('noteContent').value=note?(note.content||''):'';document.getElementById('noteTags').value=note?(note.tags||[]).join(', '):'';renderNoteAttachments(note);document.getElementById('noteModal').classList.add('show')}
+function closeNoteModal(){document.getElementById('noteModal').classList.remove('show')}
+function saveNote(){var title=document.getElementById('noteTitle').value.trim();if(!title){toast('タイトルを入力してください','error');return}var tagsStr=document.getElementById('noteTags').value.trim(),tags=tagsStr?tagsStr.split(',').map(function(s){return s.trim()}).filter(Boolean):[];var data={title:title,content:document.getElementById('noteContent').value,tags:tags};if(State.editId){Data.updateNote(State.editId,data);toast('メモを更新しました','success')}else{Data.addNote(data);toast('メモを作成しました','success')}closeNoteModal();renderNotes()}
+
+function renderNoteAttachments(note){var list=document.getElementById('noteAttachList');if(note){Data.getNoteFiles(note.id).then(function(files){list.innerHTML=files.map(function(f){return'<span class="attach-item">'+getFileIcon(f.type)+' '+esc(f.name)+'<span class="remove-attach" data-file="'+f.id+'">×</span></span>'}).join('');list.querySelectorAll('.remove-attach').forEach(function(el){el.addEventListener('click',function(){var fid=el.dataset.file;Data.detachFileFromNote(note.id,fid);renderNoteAttachments(note)})})})}else{list.innerHTML=''}}
+
+// Note: event delegation handles edit-task, delete-task, pin-note, edit-note, delete-note, preview-file, delete-file
+
+// ===== File Preview =====
+function openFilePreview(file){document.getElementById('previewName').textContent=file.name;document.getElementById('previewMeta').textContent=formatSize(file.size)+' ・ '+fmtDate(file.createdAt);document.getElementById('previewIcon').textContent=getFileIcon(file.type);var content=document.getElementById('previewContent');content.innerHTML='';if(file.type.startsWith('image/')){var img=document.createElement('img');Data.getFileData(file.id).then(function(blob){if(blob){img.src=URL.createObjectURL(blob);content.appendChild(img)}})}else if(file.type.includes('pdf')){content.innerHTML='<iframe src="about:blank"></iframe>';Data.getFileData(file.id).then(function(blob){if(blob){var url=URL.createObjectURL(blob);var iframe=content.querySelector('iframe');if(iframe)iframe.src=url}})}else if(file.type.startsWith('text/')||file.type.includes('json')||file.type.includes('javascript')){Data.getFileData(file.id).then(function(blob){if(blob){var reader=new FileReader();reader.onload=function(){content.innerHTML='<pre>'+esc(reader.result.slice(0,50000))+'</pre>'};reader.readAsText(blob)}})}else{content.innerHTML='<div style="font-size:48px;padding:40px;text-align:center">'+getFileIcon(file.type)+'<br><span style="font-size:14px;color:var(--text-secondary)">プレビュー不可</span></div>'}document.getElementById('previewDownload').onclick=function(){var a=document.createElement('a');a.download=file.name;Data.getFileData(file.id).then(function(blob){if(blob){a.href=URL.createObjectURL(blob);a.click()}})};document.getElementById('filePreviewModal').classList.add('show')}
+function closeFilePreview(){document.getElementById('filePreviewModal').classList.remove('show')}
+
+function showConfirm(msg,cb){document.getElementById('confirmMessage').textContent=msg;State.confirmCallback=cb;document.getElementById('confirmModal').classList.add('show')}
+
+// ===== Navigation =====
+function switchView(view){if(State.currentView==='freepages'&&view!=='freepages')saveCurrentFreepageContent();if(State._fpFullscreen&&view!=='freepages')toggleFreepageFullscreen();State.currentView=view;document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});document.getElementById(view+'View').classList.add('active');document.querySelectorAll('.nav-item[data-view="'+view+'"]').forEach(function(n){n.classList.add('active')});if(view==='tasks')renderTasks();else if(view==='calendar')renderCalendar();else if(view==='notes')renderNotes();else if(view==='files')renderFiles();else if(view==='freepages')renderFreepages();else if(view==='settings')renderSettings()}
+
+// ===== File Handlers =====
+async function handleFileUpload(files){for(var i=0;i<files.length;i++){(function(file){var reader=new FileReader();reader.onload=async function(){var blob=new Blob([reader.result],{type:file.type});var fileObj={name:file.name,size:file.size,type:file.type||'application/octet-stream',_blob:blob};var f=Data.addFile(fileObj);await Data.putFileData(f.id,blob);if(Sync.enabled)Sync.uploadFile(blob,f.id+'/'+file.name);if(f.type.startsWith('image/'))f._url=URL.createObjectURL(blob);renderFiles();toast('「'+file.name+'」をアップロード','success')};reader.readAsArrayBuffer(file)})(files[i])}}
+
+// File attachment sync
+async function attachCloudFile(file,fileId){if(Sync.enabled)try{var blob=await Data.getFileData(fileId);if(blob)Sync.uploadFile(blob,fileId+'/'+file.name)}catch(e){}}
+
+// ===== Boot =====
+async function bootApp(){try{taskRepeat.init()}catch(e){}try{eventRepeat.init()}catch(e){}
+function e(id){return document.getElementById(id)}
+e('accountSelector'); // no-op
+
+document.querySelectorAll('.nav-item').forEach(function(btn){btn.addEventListener('click',function(){switchView(btn.dataset.view)})})
+if(e('addFreepageBtn'))e('addFreepageBtn').addEventListener('click',function(){var name=prompt('新しいページ名を入力してください:');if(name&&name.trim()){saveCurrentFreepageContent();var fp=Data.addFreepage({title:name.trim(),content:''});State._freepageCurrentId=fp.id;renderFreepages();toast('ページを作成しました','success')}})
+setupFreepageFormatting()
+if(e('fpFullscreenBtn'))e('fpFullscreenBtn').addEventListener('click',toggleFreepageFullscreen)
+if(e('themeToggle'))e('themeToggle').addEventListener('click',toggleTheme)
+if(e('taskFilter'))e('taskFilter').addEventListener('change',function(){State.taskFilter=this.value;renderTasks()})
+if(e('addTaskBtn'))e('addTaskBtn').addEventListener('click',function(){openTaskModal(null)})
+if(e('taskModalSave'))e('taskModalSave').addEventListener('click',saveTask)
+if(e('taskModalCancel'))e('taskModalCancel').addEventListener('click',closeTaskModal)
+if(e('addEventBtn'))e('addEventBtn').addEventListener('click',function(){openEventModal(null)})
+if(e('eventModalSave'))e('eventModalSave').addEventListener('click',saveEvent)
+if(e('eventModalCancel'))e('eventModalCancel').addEventListener('click',closeEventModal)
+if(e('eventDeleteBtn'))e('eventDeleteBtn').addEventListener('click',deleteEvent)
+if(e('addNoteBtn'))e('addNoteBtn').addEventListener('click',function(){openNoteModal(null)})
+if(e('noteModalSave'))e('noteModalSave').addEventListener('click',saveNote)
+if(e('noteModalCancel'))e('noteModalCancel').addEventListener('click',closeNoteModal)
+if(e('noteSearch'))e('noteSearch').addEventListener('input',function(){State.noteSearch=this.value;renderNotes()})
+if(e('fileSearch'))e('fileSearch').addEventListener('input',function(){State.fileSearch=this.value;renderFiles()})
+if(e('addFileBtn'))e('addFileBtn').addEventListener('click',function(){var p=e('filePicker');if(p)p.click()})
+if(e('filePicker'))e('filePicker').addEventListener('change',function(){handleFileUpload(this.files);this.value=''})
+if(e('calSelector'))e('calSelector').addEventListener('change',renderCalendar)
+if(e('prevMonth'))e('prevMonth').addEventListener('click',function(){State.calMonth--;if(State.calMonth<0){State.calMonth=11;State.calYear--}renderCalendar()})
+if(e('nextMonth'))e('nextMonth').addEventListener('click',function(){State.calMonth++;if(State.calMonth>11){State.calMonth=0;State.calYear++}renderCalendar()})
+if(e('todayBtn'))e('todayBtn').addEventListener('click',function(){var d=new Date();State.calMonth=d.getMonth();State.calYear=d.getFullYear();renderCalendar()})
+if(e('confirmOk'))e('confirmOk').addEventListener('click',function(){if(State.confirmCallback)State.confirmCallback();State.confirmCallback=null;e('confirmModal').classList.remove('show')})
+if(e('confirmCancel'))e('confirmCancel').addEventListener('click',function(){State.confirmCallback=null;e('confirmModal').classList.remove('show')})
+document.querySelectorAll('.modal-overlay').forEach(function(overlay){overlay.addEventListener('click',function(e2){if(e2.target===overlay)overlay.classList.remove('show')})})
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape')document.querySelectorAll('.modal-overlay.show').forEach(function(m){m.classList.remove('show')})})
+
+if(e('notifyEnabled'))e('notifyEnabled').addEventListener('change',function(){Data.setSetting('notifyEnabled',this.checked);toast('通知設定を保存','success')})
+if(e('notifyBefore'))e('notifyBefore').addEventListener('change',function(){Data.setSetting('notifyBefore',parseInt(this.value)||60)})
+if(e('notifyInterval'))e('notifyInterval').addEventListener('change',function(){Data.setSetting('notifyInterval',parseInt(this.value)||30);restartNotificationTimer()})
+if(e('notifyRenotify'))e('notifyRenotify').addEventListener('change',function(){Data.setSetting('notifyRenotify',parseInt(this.value)||10)})
+if(e('notifyStyle'))e('notifyStyle').addEventListener('change',function(){Data.setSetting('notifyStyle',this.value)})
+if(e('defaultRepeat'))e('defaultRepeat').addEventListener('change',function(){Data.setSetting('defaultRepeat',this.value)})
+if(e('colorHigh'))e('colorHigh').addEventListener('input',function(){Data.setSetting('colorHigh',this.value);applyPriorityColors()})
+if(e('colorMedium'))e('colorMedium').addEventListener('input',function(){Data.setSetting('colorMedium',this.value);applyPriorityColors()})
+if(e('colorLow'))e('colorLow').addEventListener('input',function(){Data.setSetting('colorLow',this.value);applyPriorityColors()})
+if(e('addCalBtn'))e('addCalBtn').addEventListener('click',function(){var ncn=e('newCalName');if(!ncn)return;var name=ncn.value.trim();if(!name){toast('カレンダー名を入力してください','error');return}var color=e('newCalColor').value;Data.addCalendar({name:name,color:color,order:Data.calendars.length});ncn.value='';toast('カレンダーを作成しました','success');renderSettings();if(State.currentView==='calendar')renderCalendar()})
+if(e('clearAllData'))e('clearAllData').addEventListener('click',function(){showConfirm('すべてのデータを削除します。よろしいですか？',function(){db.delete().then(function(){location.reload()})})})
+if(e('exportBtn'))e('exportBtn').addEventListener('click',async function(){var data=await Data.getAllData();var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='taskflow_'+todayStr()+'.json';a.click();URL.revokeObjectURL(url);toast('データをエクスポートしました','success')})
+if(e('importBtn'))e('importBtn').addEventListener('click',function(){var f=e('importFile');if(f)f.click()})
+if(e('importFile'))e('importFile').addEventListener('change',function(){var file=this.files[0];if(!file)return;var reader=new FileReader();reader.onload=async function(ev){try{var data=JSON.parse(ev.target.result);if(data.tasks){await Data.importAllData(data);toast('データをインポートしました','success');switchView(State.currentView)}else{toast('無効なデータ形式です','error')}}catch(err){toast('ファイルの読み込みに失敗しました','error')}};reader.readAsText(file);this.value=''})
+
+// Sync settings
+if(e('syncForceBtn'))e('syncForceBtn').addEventListener('click',async function(){await Sync.push();toast('同期完了','success')})
+if(e('syncAuto'))e('syncAuto').addEventListener('change',function(){if(this.checked){Sync.startAutoSync();toast('自動同期ON','info')}else{Sync.stopAutoSync();toast('自動同期OFF','info')}})
+
+// Task attach file
+if(e('taskAttachBtn'))e('taskAttachBtn').addEventListener('click',function(){var fp=e('taskFilePicker');if(fp)fp.click()})
+if(e('taskFilePicker'))e('taskFilePicker').addEventListener('change',async function(){var file=this.files[0];if(!file)return;this.value='';try{var blob=file;var fileObj={name:file.name,size:file.size,type:file.type||'application/octet-stream',_blob:blob};var f=Data.addFile(fileObj);await Data.putFileData(f.id,blob);attachCloudFile(fileObj,f.id);if(State.editId){await Data.attachFileToTask(State.editId,f.id);renderTaskAttachments(Data.tasks.find(function(t){return t.id===State.editId}))}toast('ファイルを添付しました','success')}catch(e){toast('ファイル添付に失敗しました','error')}})
+
+// Note attach file
+if(e('noteAttachBtn'))e('noteAttachBtn').addEventListener('click',function(){var fp=e('noteFilePicker');if(fp)fp.click()})
+if(e('noteFilePicker'))e('noteFilePicker').addEventListener('change',async function(){var file=this.files[0];if(!file)return;this.value='';try{var blob=file;var fileObj={name:file.name,size:file.size,type:file.type||'application/octet-stream',_blob:blob};var f=Data.addFile(fileObj);await Data.putFileData(f.id,blob);attachCloudFile(fileObj,f.id);if(State.editId){await Data.attachFileToNote(State.editId,f.id);renderNoteAttachments(Data.notes.find(function(n){return n.id===State.editId}))}toast('ファイルを添付しました','success')}catch(e){toast('ファイル添付に失敗しました','error')}})
+
+// File drop zone
+var dropZone=e('fileDropZone');if(dropZone){dropZone.addEventListener('dragover',function(ev){ev.preventDefault();dropZone.classList.add('drag-over')});dropZone.addEventListener('dragleave',function(){dropZone.classList.remove('drag-over')});dropZone.addEventListener('drop',function(ev){ev.preventDefault();dropZone.classList.remove('drag-over');if(ev.dataTransfer.files.length)handleFileUpload(ev.dataTransfer.files)});dropZone.addEventListener('click',function(){var fp=e('filePicker');if(fp)fp.click()})}
+
+// Mobile
+if(e('mobileMenuBtn'))e('mobileMenuBtn').addEventListener('click',function(){e('mobileNav').classList.toggle('open');e('mobileOverlay').classList.toggle('show')})
+if(e('mobileOverlay'))e('mobileOverlay').addEventListener('click',function(){e('mobileNav').classList.remove('open');e('mobileOverlay').classList.remove('show')})
+e('mobileNav').querySelectorAll('.nav-item').forEach(function(btn){btn.addEventListener('click',function(){e('mobileNav').classList.remove('open');e('mobileOverlay').classList.remove('show');switchView(btn.dataset.view)})})
+if(e('mobileThemeBtn'))e('mobileThemeBtn').addEventListener('click',toggleTheme)
+
+// Event delegation
+document.addEventListener('click',function(ev){var action=ev.target.dataset.action;if(!action)return;var id=ev.target.dataset.id;if(!id)return;if(action==='edit-task'){var t=Data.tasks.find(function(task){return task.id===id});if(t)openTaskModal(t)}else if(action==='delete-task'){showConfirm('このタスクを削除してもよろしいですか？',function(){var t=Data.tasks.find(function(task){return task.id===id});Data.deleteTask(id);if(t)toast('「'+t.title+'」を削除しました','info');renderTasks()})}else if(action==='pin-note'){var n=Data.notes.find(function(nt){return nt.id===id});if(n){Data.updateNote(id,{pinned:!n.pinned});renderNotes()}}else if(action==='edit-note'){var n2=Data.notes.find(function(nt){return nt.id===id});if(n2)openNoteModal(n2)}else if(action==='delete-note'){showConfirm('このメモを削除してもよろしいですか？',function(){var n2=Data.notes.find(function(nt){return nt.id===id});Data.deleteNote(id);if(n2)toast('「'+n2.title+'」を削除しました','info');renderNotes()})}else if(action==='preview-file'){var f=Data.files.find(function(fl){return fl.id===id});if(f)openFilePreview(f)}else if(action==='delete-file'){showConfirm('「'+(Data.files.find(function(fl){return fl.id===id})?.name)+'」を削除しますか？',function(){var f2=Data.files.find(function(fl){return fl.id===id});if(f2&&Sync.enabled)Sync.deleteCloudFile(f2.id+'/'+f2.name);Data.deleteFile(id);renderFiles();toast('ファイルを削除しました','info')})}})
+
+switchView('tasks')
+if('Notification'in window&&Notification.permission==='default')Notification.requestPermission()
+startNotificationTimer()
+Sync.init()
+setTimeout(function(){Sync.sync()},2000) // Pull cloud data on first load
+}
+
+// ===== Bootstrap =====
+document.addEventListener('DOMContentLoaded',async function(){Data._theme=localStorage.getItem('tf_theme')||'light';try{await Data.init();applyTheme(Data.theme);applyPriorityColors();updateFilePreviewUrls();try{if(window.pywebview&&window.pywebview.api){var oldData=await pywebview.api.get_old_data();if(oldData){var old=JSON.parse(oldData);if(old.tasks&&old.tasks.length&&Data.tasks.length===0){await Data.importAllData(old);toast('デスクトップのデータを移行しました','info')}}}}catch(e){}bootApp();Data._save()}catch(e){console.error('Boot error',e);bootApp()}})
+
+// ===== Notification Timer =====
+var _notifyTimer=null
+function startNotificationTimer(){var interval=(Data.settings.notifyInterval||30)*1000;_notifyTimer=setInterval(checkNotifications,interval);setTimeout(checkNotifications,3000)}
+function restartNotificationTimer(){if(_notifyTimer)clearInterval(_notifyTimer);startNotificationTimer()}
+</script>
+</body>
+</html>
